@@ -254,6 +254,20 @@ function Search-ForDevice {
     return $res
 }
 
+function disable-notifications
+{
+    New-Item -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -Name "Enabled" -Type DWord -Value 0 -Force
+    Write-Log "HKEY User's Registry for DeviceEnrollmentActivity is set to disable notification"      
+}
+
+function enable-notifications
+{
+   # New-Item -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -Name "Enabled" -ErrorAction SilentlyContinue -Force
+    Write-Log "HKEY User's Registry for DeviceEnrollmentActivity is set to enable notification"      
+}
+
 function Get-EnrollmentStatus {
     $output = $true;
 
@@ -337,7 +351,7 @@ Function Enroll-Device {
 	}
 }
 
-function InstallWS1App {
+Function InstallWS1App {
     #saves us from downloading it
     $WS1Apppath = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")+"\Airwatch\AgentUI\Resources\Bundle\AirWatchLLC.VMwareWorkspaceONE\"
 
@@ -536,7 +550,9 @@ Function Main {
 
     if($silent) {
         Write-Host "Running migration in the background"
+        disable-notifications
         Migration
+        enable-notifications
     } else {        
         Write-Host "Showing UI flow"
         $Form.ShowDialog()
