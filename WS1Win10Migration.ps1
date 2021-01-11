@@ -1,23 +1,33 @@
 <#
 .Synopsis
-  This Powershell script:
-  1. Backup the DeploymentManifestXML registry key for each WS1 UEM deployed application
-  2. Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
-  3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
-  
+    This Powershell script:
+    1. Backup the DeploymentManifestXML registry key for each WS1 UEM deployed application
+    2. Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
+    3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
+ .NOTES
+    Created:   	    January, 2021
+    Created by:	    Phil Helmling, @philhelmling
+    Organization:   VMware, Inc.
+    Filename:       WS1Win10Migration.psm1
+    GitHub:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
 .DESCRIPTION
-  Unenrols and then enrols a Windows 10 device into a new instance whilst preserving all WS1 UEM managed applications 
-  from being uninstalled upon unenrol.
-  Requires AirWatchAgent.msi in the current folder
-
-.AUTHOR
-Mike Nelson
-Modified by Phil Helmling
+    Unenrols and then enrols a Windows 10 device into a new instance whilst preserving all WS1 UEM managed applications 
+    from being uninstalled upon unenrol.
+    Requires AirWatchAgent.msi in the current folder
 
 .EXAMPLE
-  .\Win10Migrationv0.2.ps1
-  .\Win10Migrationv0.2.ps1 -username USERNAME -password PASSWORD -SERVER DESTINATION_SERVER_URL -OGNamne DESTINATION_OG_NAME
+  .\WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_URL -OGName DESTINATION_OG_NAME
 #>
+param (
+    [Parameter(Mandatory=$true)]
+    [string]$username=$script:Username,
+    [Parameter(Mandatory=$true)]
+    [string]$password=$script:password,
+    [Parameter(Mandatory=$true)]
+    [string]$OGName=$script:OGName,
+    [Parameter(Mandatory=$true)]
+    [string]$Server=$script:Server
+)
 
 #Enable Debug Logging, not needed if api-debug.config found
 $Debug = $true;
@@ -37,21 +47,6 @@ if($Debug){
   write-host "Path: $Path"
   write-host "LogLocation: $LogLocation"
 }
-#test for airwatchagent.msi and AirWatchLLC.VMwareWorkspaceONE folder in the current folder
-
-
-# Script Vars
-$script:SERVER = "https://asXXX.awmdm.com"
-$script:OGName = 'OGNAME'
-$script:Username = 'staging_username'
-$script:Password = 'staging_password'
-
-#$SERVER = "ENROLLMENT_URL"
-#$DestinationOGName = "ENROLLMENT_OG_ID"
-###############
-#GATHER USERNAME AND PASSWORD BY PROMPTING
-#$Username = "PROMPTED_USERNAME"
-#$Password = "PROMPTED_PASSWORD"
 
 $Global:ProgressPreference = 'SilentlyContinue'
 
@@ -192,7 +187,7 @@ function Backup-DeploymentManifestXML {
     foreach ($App in $Apps){
         $apppath = $appmsnifestpath + "\" + $App
         #$apppath
-        $deploymentManifestXML = Get-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
+        #$deploymentManifestXML = Get-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
         #$deploymentManifestXML
         Rename-ItemProperty -Path $apppath -Name "DeploymentManifestXML" -NewName "DeploymentManifestXML_BAK"
         New-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
@@ -204,7 +199,7 @@ Function Invoke-EnrollDevice {
     Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
 	{
-		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /quiet ENROLL=Y IMAGE=N SERVER=$script:SERVER LGNAME=$script:OGName USERNAME=$script:Username PASSWORD=$script:Password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
+		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /quiet ENROLL=Y IMAGE=N SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:Username PASSWORD=$script:Password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
 	}
 	catch
 	{
@@ -269,7 +264,7 @@ Function Invoke-Migration {
         Backup-DeploymentManifestXML
 
         #Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
-        $StatusMessageLabel.Text = "Removing Hub to Initiate Device Side Unenrol"
+        $StatusMessageLabel.Text = "Removing Intelligent Hub to Initiate Device Side Unenrol"
         Start-Sleep -Seconds 1
         Remove-Agent
         
