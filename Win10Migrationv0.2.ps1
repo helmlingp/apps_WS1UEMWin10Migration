@@ -1,77 +1,57 @@
 <#
 .Synopsis
   This Powershell script:
-  1. removes the Deployment Manifest registry key for each WS1 UEM deployed application
-  2. unenrols a device from the source WS1 UEM instance
-  3. enrols a device into the target WS1 UEM instance using username and password prompted from user
-  4. then installs WS1 HUB app
+  1. Backup the DeploymentManifestXML registry key for each WS1 UEM deployed application
+  2. Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
+  3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
   
 .DESCRIPTION
-  Unenrols and then enrols a Windows 10 device into a new instance whilst preventing all WS1 UEM applications 
+  Unenrols and then enrols a Windows 10 device into a new instance whilst preserving all WS1 UEM managed applications 
   from being uninstalled upon unenrol.
-  Requires AirWatchAgent.msi and AirWatchLLC.VMwareWorkspaceONE folder in the current folder
+  Requires AirWatchAgent.msi in the current folder
 
 .AUTHOR
 Mike Nelson
 Modified by Phil Helmling
 
 .EXAMPLE
-  .\Win10Migrationv0.1.ps1
-  .\Win10Migrationv0.1.ps1 -username USERNAME -password PASSWORD - DestinationURL DESTINATIONURL -DestinationOGNamne DESTINATIONOGNAME
+  .\Win10Migrationv0.2.ps1
+  .\Win10Migrationv0.2.ps1 -username USERNAME -password PASSWORD -SERVER DESTINATION_SERVER_URL -OGNamne DESTINATION_OG_NAME
 #>
 
-[CmdletBinding()]
-Param(
-    [switch]$silent
-
-)
+#Enable Debug Logging, not needed if api-debug.config found
+$Debug = $true;
+#Run in background or display GUI
+$silent = $true;
 
 $current_path = $PSScriptRoot;
 if($PSScriptRoot -eq ""){
     #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
     $current_path = "C:\Temp";
 } 
-
+$DateNow = Get-Date -Format "yyyyMMdd_hhmm";
+$pathfile = "$current_path\WS1W10Migration_$DateNow";
+$Script:logLocation = "$pathfile.log";
+$Script:Path = $logLocation;
+if($Debug){
+  write-host "Path: $Path"
+  write-host "LogLocation: $LogLocation"
+}
 #test for airwatchagent.msi and AirWatchLLC.VMwareWorkspaceONE folder in the current folder
 
 
-#TEST IF PARAMETERS
-#IF NOT PARAMETERS, THEN CALL Get-AWAPIConfiguration function to read api.config
-#Enable Debug Logging, not needed if api-debug.config found
-$Debug = $true;
-
-if(Test-Path "$current_path\api-debug.config"){
-    $Debug = $true;
-	$useDebugConfig = $true;
-	Write-Log2 -Path "$logLocation" -Message "---------------------------------------------------------------------------"
-	Write-Log2 -Path "$logLocation" -Message "Started Win10 Device Migration"
-}
-
-#Load api.config into private scope
-$Private:api_settings_obj = Get-AWAPIConfiguration -Debug $Debug
-
-$Private:Server = $Private:api_settings_obj.ApiConfig.Server;
-$Private:API_Key = $Private:api_settings_obj.ApiConfig.ApiKey;
-$Private:Auth = $Private:api_settings_obj.ApiConfig.ApiAuth;
-$Private:SSLThumbprint = $Private:api_settings_obj.ApiConfig.SSLThumbprint;
-$Private:OrganizationGroupName = $Private:api_settings_obj.ApiConfig.OrganizationGroupName;
-
-If($Debug){
-	Write-Log2 -Path "$logLocation" -Message "Private:Server: $Private:Server" -Level Info
-	Write-Log2 -Path "$logLocation" -Message "Private:API_Key: $Private:API_Key" -Level Info
-	Write-Log2 -Path "$logLocation" -Message "Private:Auth: $Private:Auth" -Level Info
-	Write-Log2 -Path "$logLocation" -Message "Private:SSLThumbprint: $Private:SSLThumbprint" -Level Info
-	Write-Log2 -Path "$logLocation" -Message "Private:OrganizationGroupName: $Private:OrganizationGroupName" -Level Info
-}
-
-
 # Script Vars
-$DestinationURL = "ENROLLMENT_URL"
-$DestinationOGName = "ENROLLMENT_OG_ID"
+$script:SERVER = "https://asXXX.awmdm.com"
+$script:OGName = 'OGNAME'
+$script:Username = 'staging_username'
+$script:Password = 'staging_password'
+
+#$SERVER = "ENROLLMENT_URL"
+#$DestinationOGName = "ENROLLMENT_OG_ID"
 ###############
 #GATHER USERNAME AND PASSWORD BY PROMPTING
-$Username = "PROMPTED_USERNAME"
-$Password = "PROMPTED_PASSWORD"
+#$Username = "PROMPTED_USERNAME"
+#$Password = "PROMPTED_PASSWORD"
 
 $Global:ProgressPreference = 'SilentlyContinue'
 
@@ -80,7 +60,7 @@ Add-Type -AssemblyName System.Windows.Forms
 
 $Form                            = New-Object system.Windows.Forms.Form
 $Form.ClientSize                 = '615,266'
-$Form.text                       = "Device Enrolment Utility"
+$Form.text                       = "Workspace ONE Windows 10 Device Migration Utility"
 $Form.TopMost                    = $false
 
 $Status_Label                    = New-Object system.Windows.Forms.Label
@@ -93,7 +73,7 @@ $Status_Label.location           = New-Object System.Drawing.Point(260,53)
 $Status_Label.Font               = 'Microsoft Sans Serif,10'
 
 $StartButton                     = New-Object system.Windows.Forms.Button
-$StartButton.text                = "Start Enrolment"
+$StartButton.text                = "Start Migration"
 $StartButton.width               = 113
 $StartButton.height              = 30
 $StartButton.location            = New-Object System.Drawing.Point(485,217)
@@ -127,27 +107,8 @@ $StatusMessageLabel.Font         = 'Microsoft Sans Serif,10'
 $Form.controls.AddRange(@($Status_Label,$StartButton,$CloseButton,$StatusMessageLabel,$ContinueButton))
 
 $CloseButton.Add_Click({ $Form.Close() })
-$StartButton.Add_Click({ Enrolment })
-$ContinueButton.Add_Click({ Continue-Enrolment })
-
-function Uninstall-App {
-    Param(
-        [Parameter(Mandatory=$True)]
-        [string]$uninstallString
-    )
-
-    try
-		{
-			Write-host "$uninstallString GUID found"
-			Write-host "Uninstalling..."
-			start-process -Wait "msiexec" -arg "/X $uninstallString /qn"
-		}
-		catch
-		{
-			Write-host $_.Exception
-			Write-host "Issues with uninstalling $uninstallString"
-		}
-}
+$StartButton.Add_Click({ Invoke-Migration })
+$ContinueButton.Add_Click({ Invoke-ContinueMigration })
 
 function Remove-Agent {
 <#     $uninstallStringAirWatch64 = (Get-ItemProperty HKLM:\Software\wow6432node\Microsoft\Windows\CurrentVersion\Uninstall\* | where-Object { $_.DisplayName -like "Airwatch*" }).PSChildName
@@ -207,48 +168,6 @@ function Remove-Agent {
     }
 }
 
-function Get-AWAPIConfiguration{
-	param([bool]$Debug)
-	If($Debug) {
-		Write-Log2 -Path "$logLocation" -Message "Get device attributes from api.config" -Level Info
-		Write-Log2 -Path "$logLocation" -Message "---------------------------------------------------------------------------" -Level Info
-	}
-	if(Test-Path "$current_path\api-debug.config"){
-		$useDebugConfig = $true;
-		#$Debug = $true;
-	}
-	#Read api.config file and return as object
-	if(!$useDebugConfig){
-        $Private:api_config_file = [IO.File]::ReadAllText("$current_path\api.config");
-		If ($Debug) {
-			Write-Log2 -Path "$logLocation" -Message "api_config_file: $current_path\api.config" -Level Info
-		}
-		#Encrypt api.config if not already (test to read if 'ApiConfig' exists)
-        if($Private:api_config_file.Contains('"ApiConfig"')){
-            $Private:api_settings = $Private:api_config_file;
-            $encrypted = ConvertTo-EncryptedFile -FileContents $Private:api_config_file;
-            if($encrypted){
-                Set-Content -Path ("$current_path\api.config") -Value $encrypted;
-            }
-        } else {
-			#If already enrypted, read into ConvertFrom-EncryptedFile function to decrypt
-			$Private:api_settings = ConvertFrom-EncryptedFile -FileContents $Private:api_config_file;
-        }
-    } else {
-        If ($Debug) {
-			Write-Log2 -Path "$logLocation" -Message "api_config_file: $current_path\api-debug.config" -Level Info
-		}
-		$Private:api_config_file = [IO.File]::ReadAllText("$current_path\api-debug.config");
-        $Private:api_settings = $Private:api_config_file;
-    }
-    $Private:api_settings_obj = ConvertFrom-Json -InputObject $Private:api_settings
-	
-    $content_type = "application/json;version=1";
-    $content_type_v2 = "application/json;version=2";
-
-    return $api_settings_obj;
-}
-
 function Get-EnrollmentStatus {
     $output = $true;
 
@@ -265,38 +184,27 @@ function Get-EnrollmentStatus {
     return $output
 }
 
-function Get-AppUninstalls {
-    $output = $true;
+function Backup-DeploymentManifestXML {
 
-    $AppManifestPaths = "HKLM:\SOFTWARE\AirwatchMDM\AppDeploymentAgent\AppManifests\*"
-    $Apps = (Get-ItemProperty -Path $AppManifestPaths -ErrorAction SilentlyContinue).PSChildname
+    $appmsnifestpath = "HKLM:\SOFTWARE\AirWatchMDM\AppDeploymentAgent\AppManifests"
+    $Apps = (Get-ItemProperty -Path $appmsnifestpaths -ErrorAction SilentlyContinue).PSChildname
 
-    $EnrollmentPath = "HKLM:\SOFTWARE\AirwatchMDM\AppDeploymentAgent\AppManifests\$Apps"
-    $AppUninstallDeplManifestXML = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).DeploymentManifestXML
-
-    if($null -eq $AppUninstallDeplManifestXML) {
-        $output = $false
-    }
-
-    foreach ($Cert in $AirwatchCert) {
-        $cert | Remove-Item -Force
+    foreach ($App in $Apps){
+        $apppath = $appmsnifestpath + "\" + $App
+        #$apppath
+        $deploymentManifestXML = Get-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
+        #$deploymentManifestXML
+        Rename-ItemProperty -Path $apppath -Name "DeploymentManifestXML" -NewName "DeploymentManifestXML_BAK"
+        New-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
     }
 }
 
-Function Get-WS1HubAppStatus {
-    $output = $true;
 
-    $WS1HubAppInstalled = Get-AppxPackage -Name "AirWatchLLC.VMwareWorkspaceONE"
-    if($null -eq $WS1HubAppInstalled) {
-        $output = $false
-    }
-}
-
-Function Enroll-Device {
-    Write-Log2 -Path "$logLocation" -Message "Enrolling device into $DestinationURL" -Level Info
+Function Invoke-EnrollDevice {
+    Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
 	{
-		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /quiet ENROLL=Y IMAGE=N SERVER=$DestinationURL LGNAME=$DestinationOGName USERNAME=$Username PASSWORD=$Password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
+		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /quiet ENROLL=Y IMAGE=N SERVER=$script:SERVER LGNAME=$script:OGName USERNAME=$script:Username PASSWORD=$script:Password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
 	}
 	catch
 	{
@@ -304,7 +212,7 @@ Function Enroll-Device {
 	}
 }
 
-Function Continue-Enrolment {
+Function Invoke-ContinueMigration {
 
     Write-Log2 -Path "$logLocation" -Message "Resuming Enrollment Process" -Level Info
     $StatusMessageLabel.Text = "Resuming Enrollment Process"
@@ -312,7 +220,7 @@ Function Continue-Enrolment {
 
     $ContinueButton.Enabled = $false
 
-    Enroll-Device
+    Invoke-EnrollDevice
 
     $enrolled = $false
 
@@ -335,29 +243,8 @@ Function Continue-Enrolment {
     }
 }
 
-Function Install-HubApp {
-    Write-Log2 -Path "$logLocation" -Message "Installing WS1 Hub App" -Level Info
-    #not sure if need to copy, should probably download with enrolment??
-    $WS1Apppath = "$current_path\AirWatchLLC.VMwareWorkspaceONE"
-    $WS1AppCachepath = "C:\Program Files (x86)\Airwatch\AgentUI\Resources\Bundle\AirWatchLLC.VMwareWorkspaceONE"
-    $WS1Appfile = "668f4ce67ec547f3a39a59e031b8d07b.appxbundle"
-    $WS1Applicense = "668f4ce67ec547f3a39a59e031b8d07b_License1.xml"
-    if(Test-Path "$WS1Apppath\$WS1Appfile"){
-        #Copy to normal download path
-        Copy-Item -Force -Recurse "$WS1Apppath\*" -Destination $WS1AppCachepath
-        
-        Try {
-            Add-AppxProvisionedPackage -Online -PackagePath $WS1Apppath\$WS1Appfile -LicensePath $WS1Apppath\$WS1Applicense;
-        } catch {
-            Write-Log2 -Path "$logLocation" -Message $_.Exception -Level Info
-        }
-    } else {
-        Write-Log2 -Path "$logLocation" -Message "Can't find WS1 Hub App to install it" -Level Info
-    }
-    
-}
 
-Function Migration {
+Function Invoke-Migration {
     $StartButton.Enabled = $false
     Write-Log2 -Path "$logLocation" -Message "Beginning Migration Process" -Level Info
     $StatusMessageLabel.Text = "Beginning Migration Process"
@@ -365,17 +252,8 @@ Function Migration {
 
     # If they passed the verbose arg, set the global var
     if ($PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent) {
-      $global:isVerbose = $true
+        $global:isVerbose = $true
     }
-
-    # Build API Headers
-    $authString = Create-BasicAuthHeader -username $SourceApiUsername -password $SourceApiPassword
-    $headers = Create-Headers -authString $authString -tenantCode $SourceApiKey -acceptType "application/json"
-    Write-Verbose "Headers :: $($headers)"
-
-    # Check API Version
-    $version = Get-AirWatchVersion -headers $headers -awServer $SourceURL
-    Write-Log2 -Path "$logLocation" -Message "AirWatch Version is $($version)" -Level Info
 
     # Check Enrollment Status
     $enrolled = Get-EnrollmentStatus
@@ -383,42 +261,19 @@ Function Migration {
     $StatusMessageLabel.Text = "Checking Device Enrollment Status"
     Start-Sleep -Seconds 1
     if($enrolled) {
-        #Write-Log2 -Path "$logLocation" -Message "Device is enrolled...fetching UDID" -Level Info
-        #$StatusMessageLabel.Text = "Device is enrolled...fetching UDID"
         Write-Log2 -Path "$logLocation" -Message "Device is enrolled" -Level Info
         $StatusMessageLabel.Text = "Device is enrolled"
         Start-Sleep -Seconds 1
-        <# # Get UDID
-        $udid = Get-DeviceUDID
 
-        Write-Log2 -Path "$logLocation" -Message "Getting Device ID from WS1 UEM" -Level Info
-        $StatusMessageLabel.Text = "Getting Device ID from WS1 UEM"
-        Start-Sleep -Seconds 1
-        $idRes = Search-ForDevice -deviceUDID $udid -headers $headers -awURL $SourceURL
-        $deviceId = $idRes.id.Value
+        # Keep Managed Applications by removing MDM Uninstall String
+        Backup-DeploymentManifestXML
 
-        # Call Enterprise Wipe
-        Write-Log2 -Path "$logLocation" -Message "Calling EnterpriseWipe on the server" -Level Info
-        $StatusMessageLabel.Text = "Calling EnterpriseWipe on the server"
-        Start-Sleep -Seconds 1
-        $res = Invoke-MDMCommand -deviceID $deviceId -command "EnterpriseWipe" -headers $headers -awURL $SourceURL
-        
-        if($null -eq $res) {
-            Write-Log2 -Path "$logLocation" -Message "EnterpriseWipe Command failed" -Level Info
-            $StatusMessageLabel.Text = "EnterpriseWipe Command failed"
-            Start-Sleep -Seconds 1
-            Exit
-        } #>
-
-        # Keep Enterprise Applications by removing MDM Uninstall String
-
-
+        #Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
         $StatusMessageLabel.Text = "Removing Hub to Initiate Device Side Unenrol"
         Start-Sleep -Seconds 1
-
         Remove-Agent
         
-        # Sleep for 30 seconds before checking
+        # Sleep for 10 seconds before checking
         Start-Sleep -Seconds 10
         Write-Log2 -Path "$logLocation" -Message "Checking Enrollment Status" -Level Info
         $StatusMessageLabel.Text = "Checking Enrollment Status"
@@ -426,73 +281,43 @@ Function Migration {
         # Wait till complete
         while($enrolled) { 
             $status = Get-EnrollmentStatus
-
             if($status -eq $false) {
                 Write-Log2 -Path "$logLocation" -Message "Device is no longer enrolled into the Source environment" -Level Info
                 $StatusMessageLabel.Text = "Device is no longer enrolled into the Source environment"
                 Start-Sleep -Seconds 1
                 $enrolled = $false
             }
-
             Start-Sleep -Seconds 5
         }
 
     }
 
-    # Once not enrolled - Run enrollment script.
-    Write-Log2 -Path "$logLocation" -Message "Checking connectivity to Destination Server" -Level Info
-    $StatusMessageLabel.Text = "Checking connectivity to Destination Server"
+    # Once not enrolled, enrol using Staging flow.
+    Write-Log2 -Path "$logLocation" -Message "Running Enrollment process" -Level Info
+    $StatusMessageLabel.Text = "Running Enrollment process"
     Start-Sleep -Seconds 1
-    $connectionStatus = Test-Connection -ComputerName $DestinationURL -Quiet
-     
-    if($connectionStatus -eq $true) 
-    {
-        Write-Log2 -Path "$logLocation" -Message "Device has connectivity to the Destination Server" -Level Info
-        $StatusMessageLabel.Text = "Device has connectivity to the New Environment"
-        
-        Start-Sleep -Seconds 1
-        
-        Write-Log2 -Path "$logLocation" -Message "Running Remove-Agent again to confirm agent is not installed" -Level Info
-        Start-Sleep -Seconds 1
-        Remove-Agent
-        
-        
+    Invoke-EnrollDevice
 
-        Write-Log2 -Path "$logLocation" -Message "Running Enrollment process" -Level Info
-        $StatusMessageLabel.Text = "Running Enrollment process"
-        Start-Sleep -Seconds 1
-        Enroll-Device
+    $enrolled = $false
 
-
-        $enrolled = $false
-
-        while($enrolled -eq $false) {
-            $status = Get-EnrollmentStatus
-            if($status -eq $true) {
-                $enrolled = $status
-                Write-Log2 -Path "$logLocation" -Message "Device Enrollment is complete" -Level Info
-                $StatusMessageLabel.Text = "Device Enrollment is complete"
-                Start-Sleep -Seconds 1
-                $StartButton.Visible = $false
-                $ContinueButton.Visible = $false
-                $CloseButton.Visible = $true
-                $CloseButton.Enabled = $true
-            } else {
-                Write-Log2 -Path "$logLocation" -Message "Waiting for enrollment to complete" -Level Info
-                $StatusMessageLabel.Text = "Waiting for enrollment to complete"
-                Start-Sleep -Seconds 10
-            }
+    while($enrolled -eq $false) {
+        $status = Get-EnrollmentStatus
+        if($status -eq $true) {
+            $enrolled = $status
+            Write-Log2 -Path "$logLocation" -Message "Device Enrollment is complete" -Level Info
+            $StatusMessageLabel.Text = "Device Enrollment is complete"
+            Start-Sleep -Seconds 1
+            $StartButton.Visible = $false
+            $ContinueButton.Visible = $false
+            $CloseButton.Visible = $true
+            $CloseButton.Enabled = $true
+        } else {
+            Write-Log2 -Path "$logLocation" -Message "Waiting for enrollment to complete" -Level Info
+            $StatusMessageLabel.Text = "Waiting for enrollment to complete"
+            Start-Sleep -Seconds 10
         }
-
-    } else 
-    {
-        Write-Log2 -Path "$logLocation" -Message "Not connected to Wifi, showing UI notification to continue once reconnected" -Level Info
-        $StatusMessageLabel.Text = "Device cannot reach the new environment, please check network connectivity"
-        Start-Sleep -Seconds 1
-        # Update UI to have enrollment continue button
-        $StartButton.Visible = $false
-        $ContinueButton.Visible = $true
     }
+
 }
 
 function Write-Log {
@@ -500,15 +325,16 @@ function Write-Log {
     Param
     (
         [Parameter(Mandatory=$true,
-                   ValueFromPipelineByPropertyName=$true)]
+        ValueFromPipelineByPropertyName=$true)]
         [ValidateNotNullOrEmpty()]
         [Alias("LogContent")]
         [string]$Message,
 
         [Parameter(Mandatory=$false)]
         [Alias('LogPath')]
-        [string]$Path='C:\temp\grppolicies\setup_logs.txt',
-        
+        [Alias('LogLocation')]
+        [string]$Path=$Local:Path,
+
         [Parameter(Mandatory=$false)]
         [ValidateSet("Error","Warn","Info")]
         [string]$Level="Info",
@@ -521,6 +347,21 @@ function Write-Log {
     {
         # Set VerbosePreference to Continue so that verbose messages are displayed.
         $VerbosePreference = 'Continue'
+
+        if(!$Path){
+            $current_path = $PSScriptRoot;
+            if($PSScriptRoot -eq ""){
+                #default path
+                $current_path = "C:\Temp";
+            }
+    
+            #setup Report/Log file
+            $DateNow = Get-Date -Format "yyyyMMdd_hhmm";
+            $pathfile = "$current_path\WS1API_$DateNow";
+            $Local:logLocation = "$pathfile.log";
+            $Local:Path = $logLocation;
+        }
+        
     }
     Process
     {
@@ -533,7 +374,7 @@ function Write-Log {
 
         # If attempting to write to a log file in a folder/path that doesn't exist create the file including the path.
         elseif (!(Test-Path $Path)) {
-            Write-Verbose "Creating $Path."
+            #Write-Verbose "Creating $Path."
             $NewLogFile = New-Item $Path -Force -ItemType File
             }
 
@@ -568,28 +409,34 @@ function Write-Log {
     }
 }
 
-function Write-Log2{ #Wrapper function to made code easier to read;
+function Write-Log2{
     [CmdletBinding()]
     Param
     (
         [string]$Message,
-        [string]$Path=$logLocation,
+        
+        [Alias('LogPath')]
+        [Alias('LogLocation')]
+        [string]$Path=$Local:Path,
+        
         [Parameter(Mandatory=$false)]
         [ValidateSet("Success","Error","Warn","Info")]
         [string]$Level="Info",
+        
         [switch]$UseLocal
     )
     if((!$UseLocal) -and $Level -ne "Success"){
-        Write-Log -LogPath $Path -LogContent $Message -Level $Level;
+        Write-Log -Path "$Path" -Message $Message -Level $Level;
     } else {
         $ColorMap = @{"Success"="Green";"Error"="Red";"Warn"="Yellow"};
         $FontColor = "White";
         If($ColorMap.ContainsKey($Level)){
             $FontColor = $ColorMap[$Level];
         }
-        $DateNow = (Date).ToString("yyyy-mm-dd hh:mm:ss");
+        $DateNow = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        #$DateNow = (Date).ToString("yyyy-mm-dd hh:mm:ss");
         Add-Content -Path $Path -Value ("$DateNow     ($Level)     $Message")
-        Write-Log2 -Path "$logLocation" -Message "$MethodName::$Level`t$Message" -ForegroundColor $FontColor;
+        Write-Host "$MethodName::$Level`t$Message" -ForegroundColor $FontColor;
     }
 }
 
@@ -602,13 +449,30 @@ Function Main {
         exit
     }
 
-    if($silent) {
-        Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info
-        Migration
-    } else {        
-        Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the Foreground" -Level Info
-        $Form.ShowDialog()
+    #Test connectivity to destination server, if available, then proceed with unenrol and enrol
+    Write-Log2 -Path "$logLocation" -Message "Checking connectivity to Destination Server" -Level Info
+    $StatusMessageLabel.Text = "Checking connectivity to Destination Server"
+    Start-Sleep -Seconds 1
+    $connectionStatus = Test-Connection -ComputerName $SERVER -Quiet
+ 
+    if($connectionStatus -eq $true) {
+        if($silent) {
+            Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info
+            Invoke-Migration
+        } else {        
+            Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the Foreground" -Level Info
+            $Form.ShowDialog()
+        }
+    } else {
+        Write-Log2 -Path "$logLocation" -Message "Not connected to Wifi, showing UI notification to continue once reconnected" -Level Info
+        $StatusMessageLabel.Text = "Device cannot reach the new environment, please check network connectivity"
+        Start-Sleep -Seconds 1
+        # Update UI to have enrollment continue button
+        $StartButton.Visible = $false
+        $ContinueButton.Visible = $true
     }
+
+
 }
 
 Main
