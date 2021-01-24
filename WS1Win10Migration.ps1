@@ -8,7 +8,7 @@
     Created:   	    January, 2021
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
-    Filename:       WS1Win10Migration.psm1
+    Filename:       WS1Win10Migration.ps1
     GitHub:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
 .DESCRIPTION
     Unenrols and then enrols a Windows 10 device into a new instance whilst preserving all WS1 UEM managed applications 
@@ -49,7 +49,6 @@ if($Debug){
 }
 
 $Global:ProgressPreference = 'SilentlyContinue'
-
 Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
@@ -106,32 +105,8 @@ $StartButton.Add_Click({ Invoke-Migration })
 $ContinueButton.Add_Click({ Invoke-ContinueMigration })
 
 function Remove-Agent {
-<#     $uninstallStringAirWatch64 = (Get-ItemProperty HKLM:\Software\wow6432node\Microsoft\Windows\CurrentVersion\Uninstall\* | where-Object { $_.DisplayName -like "Airwatch*" }).PSChildName
-    $uninstallStringAirWatch32 = (Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | where-Object { $_.DisplayName -like "Airwatch*" }).PSChildName
-    $uninstallStringHub64 = (Get-ItemProperty HKLM:\Software\wow6432node\Microsoft\Windows\CurrentVersion\Uninstall\* | where-Object { $_.DisplayName -like "*Intelligent Hub*" }).PSChildName
-    $uninstallStringHub32 = (Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | where-Object { $_.DisplayName -like "*Intelligent Hub*" }).PSChildName
-    
-    if ($uninstallStringAirWatch64)
-	{
-        Uninstall-App -uninstallString $uninstallStringAirWatch64
-	}
-    
-    if ($uninstallStringAirWatch32)
-	{
-		Uninstall-App -uninstallString $uninstallStringAirWatch32
-    }
-    
-    if ($uninstallStringHub64) 
-    {
-        Uninstall-App -uninstallString $uninstallStringHub64
-    }
-
-    if ($uninstallStringHub32)
-    {
-        Uninstall-App -uninstallString $uninstallStringHub32
-    } #>
     #Uninstall Agent - requires manual delete of device object in console
-    $b = Get-WmiObject -Class win32_product -Filter "Name like 'Workspace ONE Intelligent Hub'"
+    $b = Get-WmiObject -Class win32_product -Filter "Name like 'Workspace ONE Intelligent%'"
     $b.Uninstall()
 
     #uninstall WS1 App
@@ -148,7 +123,7 @@ function Remove-Agent {
     
     #Delete folders
     $path = "$env:ProgramData\AirWatch\UnifiedAgent\Logs\"
-    Get-ChildItem $path -Recurse | Remove-Item -Force
+    Get-ChildItem $path | Remove-Item -Recurse -Force
 
     #delete certificates
     $Certs = get-childitem cert:"CurrentUser" -Recurse
@@ -182,24 +157,52 @@ function Get-EnrollmentStatus {
 function Backup-DeploymentManifestXML {
 
     $appmsnifestpath = "HKLM:\SOFTWARE\AirWatchMDM\AppDeploymentAgent\AppManifests"
-    $Apps = (Get-ItemProperty -Path $appmsnifestpaths -ErrorAction SilentlyContinue).PSChildname
+    $Apps = (Get-ItemProperty -Path $appmsnifestpath -ErrorAction SilentlyContinue).PSChildname
 
     foreach ($App in $Apps){
         $apppath = $appmsnifestpath + "\" + $App
-        #$apppath
-        #$deploymentManifestXML = Get-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
-        #$deploymentManifestXML
+
         Rename-ItemProperty -Path $apppath -Name "DeploymentManifestXML" -NewName "DeploymentManifestXML_BAK"
         New-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
     }
 }
 
+function disable-notifications
+{
+    #New-Item -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -Force -ErrorAction SilentlyContinue
+    #Set-ItemProperty -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -Name "Enabled" -Type DWord -Value 0 -Force
+
+    New-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\AirWatchLLC.WorkspaceONEIntelligentHub_htcwkw4rx2gx4!App" -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\AirWatchLLC.WorkspaceONEIntelligentHub_htcwkw4rx2gx4!App" -Name "Enabled" -Type DWord -Value 0 -Force
+
+    New-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.airwatch.windowsprotectionagent" -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.airwatch.windowsprotectionagent" -Name "Enabled" -Type DWord -Value 0 -Force
+
+    New-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Name "Enabled" -Type DWord -Value 0 -Force
+
+    Write-Log2 -Path "$logLocation" -Message "Toast Notifications for WS1 iHub, Protection Agent, and Hub App disabled" -Level Info
+}
+
+function enable-notifications
+{
+   # New-Item -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -ErrorAction SilentlyContinue
+    #Remove-ItemProperty -Path Registry::HKEY_USERS\$global:SID\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity -Name "Enabled" -ErrorAction SilentlyContinue -Force
+    #Write-Log2 -Path "$logLocation" -Message "HKEY User's Registry for DeviceEnrollmentActivity is set to enable notification" -Level Info
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\AirWatchLLC.WorkspaceONEIntelligentHub_htcwkw4rx2gx4!App" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.airwatch.windowsprotectionagent" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Write-Log2 -Path "$logLocation" -Message "Toast Notifications for WS1 iHub, Protection Agent, and Hub App enabled" -Level Info
+}
 
 Function Invoke-EnrollDevice {
     Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
 	{
-		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /quiet ENROLL=Y IMAGE=N SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:Username PASSWORD=$script:Password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
+		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /quiet ENROLL=Y IMAGE=N SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
 	}
 	catch
 	{
@@ -228,6 +231,9 @@ Function Invoke-ContinueMigration {
             $ContinueButton.Visible = $false
             $CloseButton.Visible = $true
             $CloseButton.Enabled = $true
+
+            # Enable Toast notifications
+            enable-notifications
         } else {
             Write-Log2 -Path "$logLocation" -Message "Waiting for enrollment to complete" -Level Info
             $StatusMessageLabel.Text = "Waiting for enrollment to complete"
@@ -249,6 +255,9 @@ Function Invoke-Migration {
     if ($PSCmdlet.MyInvocation.BoundParameters["Verbose"].IsPresent) {
         $global:isVerbose = $true
     }
+
+    # Disable Toast notifications
+    disable-notifications
 
     # Check Enrollment Status
     $enrolled = Get-EnrollmentStatus
@@ -306,6 +315,9 @@ Function Invoke-Migration {
             $ContinueButton.Visible = $false
             $CloseButton.Visible = $true
             $CloseButton.Enabled = $true
+
+            # Enable Toast notifications
+            enable-notifications
         } else {
             Write-Log2 -Path "$logLocation" -Message "Waiting for enrollment to complete" -Level Info
             $StatusMessageLabel.Text = "Waiting for enrollment to complete"
@@ -448,8 +460,9 @@ Function Main {
     Write-Log2 -Path "$logLocation" -Message "Checking connectivity to Destination Server" -Level Info
     $StatusMessageLabel.Text = "Checking connectivity to Destination Server"
     Start-Sleep -Seconds 1
-    $connectionStatus = Test-Connection -ComputerName $SERVER -Quiet
- 
+    #$connectionStatus = Test-Connection -ComputerName $SERVER -Quiet
+    $connectionStatus = Test-NetConnection -ComputerName $SERVER -Port 443 -InformationLevel Quiet -ErrorAction Stop
+
     if($connectionStatus -eq $true) {
         if($silent) {
             Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info
