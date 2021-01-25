@@ -32,6 +32,6 @@ param (
 $current_path = $PSScriptRoot
 $dest_path = "C:\Temp\WS1Win10Migration"
 New-Item -Path $dest_path -ItemType Directory
-Copy-Item -Path "$current_path\*" -Destination $dest_path -Recurse
+Copy-Item -Path "$current_path\*" -Destination $dest_path -Recurse -Force
 
 & "$dest_path\WS1Win10Migration.ps1" -username $script:username -password $script:password -Server $script:Server -OGName $script:OGName
