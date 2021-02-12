@@ -112,30 +112,36 @@ function Remove-Agent {
     #uninstall WS1 App
     Get-AppxPackage *AirWatchLLC* | Remove-AppxPackage
     
-    #Delte reg keys
-    Remove-Item -Path HKLM:\SOFTWARE\Airwatch\* -Recurse
-    Remove-Item -Path HKLM:\SOFTWARE\AirwatchMDM\* -Recurse
-    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\EnterpriseResourceManager\Tracked\* -Recurse
-    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\Enrollments\* -Recurse
-    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\Provisioning\omadm\Accounts\* -Recurse
+<#     #Delte reg keys
+    Write-Log "Syncing oma-dm to ensure that it breaks mdm relationship after hub removal"
+	$GUID = (Get-Item -Path "HKLM:SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\*" -ErrorAction SilentlyContinue).PSChildname
+	Start-Process "$ENV:windir\system32\DeviceEnroller.exe" -arg "/o $GUID /c"
+	write-log "Wait 5 min for OMA-DM Un-enrollment to complete"
+    Start-Sleep 300
+    
+    Remove-Item -Path HKLM:\SOFTWARE\Airwatch\* -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path HKLM:\SOFTWARE\AirwatchMDM\* -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\EnterpriseResourceManager\Tracked\* -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\Enrollments\* -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\Provisioning\omadm\Accounts\* -Recurse -Force -ErrorAction SilentlyContinue
     # may not work ;)
-    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\EnterpriseDesktopAppManagement\*\MSI\* -Recurse
+    Remove-Item -Path HKLM:\SOFTWARE\Microsoft\EnterpriseDesktopAppManagement\*\MSI\* -Recurse -Force -ErrorAction SilentlyContinue
     
     #Delete folders
     $path = "$env:ProgramData\AirWatch\UnifiedAgent\Logs\"
-    Get-ChildItem $path | Remove-Item -Recurse -Force
+    Get-ChildItem $path | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
     #delete certificates
     $Certs = get-childitem cert:"CurrentUser" -Recurse
     $AirwatchCert = $certs | Where-Object {$_.Issuer -eq "CN=AirWatchCa"}
     foreach ($Cert in $AirwatchCert) {
-        $cert | Remove-Item -Force
+        $cert | Remove-Item -Force -ErrorAction SilentlyContinue
     }
     
     $AirwatchCert = $certs | Where-Object {$_.Subject -like "*AwDeviceRoot*"}
     foreach ($Cert in $AirwatchCert) {
-        $cert | Remove-Item -Force
-    }
+        $cert | Remove-Item -Force -ErrorAction SilentlyContinue
+    } #>
 }
 
 function Get-EnrollmentStatus {
@@ -164,6 +170,13 @@ function Backup-DeploymentManifestXML {
 
         Rename-ItemProperty -Path $apppath -Name "DeploymentManifestXML" -NewName "DeploymentManifestXML_BAK"
         New-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
+    }
+}
+
+function Backup-Recovery {
+    $path = 'C:\Recovery\OEM'
+    if($path){
+        Copy-Item -Path $path -Destination "$path.bak" -Recurse -Force
     }
 }
 
@@ -201,7 +214,7 @@ Function Invoke-EnrollDevice {
     Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
 	{
-		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /quiet ENROLL=Y IMAGE=N SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
+		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /qn ENROLL=Y DOWNLOADWSBUNDLE=false SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
 	}
 	catch
 	{
@@ -243,6 +256,113 @@ Function Invoke-ContinueMigration {
     }
 }
 
+Function TestIsPendingReboot{
+
+    $VerbosePreference = $using:VerbosePreference
+    function Test-RegistryKey {
+        [OutputType('bool')]
+        [CmdletBinding()]
+        param
+        (
+            [Parameter(Mandatory)]
+            [ValidateNotNullOrEmpty()]
+            [string]$Key
+        )
+    
+        $ErrorActionPreference = 'Stop'
+
+        if (Get-Item -Path $Key -ErrorAction Ignore) {
+            $true
+        }
+    }
+
+    function Test-RegistryValue {
+        [OutputType('bool')]
+        [CmdletBinding()]
+        param
+        (
+            [Parameter(Mandatory)]
+            [ValidateNotNullOrEmpty()]
+            [string]$Key,
+
+            [Parameter(Mandatory)]
+            [ValidateNotNullOrEmpty()]
+            [string]$Value
+        )
+    
+        $ErrorActionPreference = 'Stop'
+
+        if (Get-ItemProperty -Path $Key -Name $Value -ErrorAction Ignore) {
+            $true
+        }
+    }
+
+    function Test-RegistryValueNotNull {
+        [OutputType('bool')]
+        [CmdletBinding()]
+        param
+        (
+            [Parameter(Mandatory)]
+            [ValidateNotNullOrEmpty()]
+            [string]$Key,
+
+            [Parameter(Mandatory)]
+            [ValidateNotNullOrEmpty()]
+            [string]$Value
+        )
+    
+        $ErrorActionPreference = 'Stop'
+
+        if (($regVal = Get-ItemProperty -Path $Key -Name $Value -ErrorAction Ignore) -and $regVal.($Value)) {
+            $true
+        }
+    }
+
+    # Added "test-path" to each test that did not leverage a custom function from above since
+    # an exception is thrown when Get-ItemProperty or Get-ChildItem are passed a nonexistant key path
+    $tests = @(
+        { Test-RegistryKey -Key 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending' }
+        { Test-RegistryKey -Key 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootInProgress' }
+        { Test-RegistryKey -Key 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired' }
+        { Test-RegistryKey -Key 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending' }
+        { Test-RegistryKey -Key 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\PostRebootReporting' }
+        { Test-RegistryValueNotNull -Key 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Value 'PendingFileRenameOperations' }
+        { Test-RegistryValueNotNull -Key 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Value 'PendingFileRenameOperations2' }
+        { 
+            # Added test to check first if key exists, using "ErrorAction ignore" will incorrectly return $true
+            'HKLM:\SOFTWARE\Microsoft\Updates' | Where-Object { test-path $_ -PathType Container } | ForEach-Object {            
+                (Get-ItemProperty -Path $_ -Name 'UpdateExeVolatile' | Select-Object -ExpandProperty UpdateExeVolatile) -ne 0 
+            }
+        }
+        { Test-RegistryValue -Key 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' -Value 'DVDRebootSignal' }
+        { Test-RegistryKey -Key 'HKLM:\SOFTWARE\Microsoft\ServerManager\CurrentRebootAttemps' }
+        { Test-RegistryValue -Key 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon' -Value 'JoinDomain' }
+        { Test-RegistryValue -Key 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon' -Value 'AvoidSpnSet' }
+        {
+            # Added test to check first if keys exists, if not each group will return $Null
+            # May need to evaluate what it means if one or both of these keys do not exist
+            ( 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' | Where-Object { test-path $_ } | %{ (Get-ItemProperty -Path $_ ).ComputerName } ) -ne 
+            ( 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' | Where-Object { Test-Path $_ } | %{ (Get-ItemProperty -Path $_ ).ComputerName } )
+        }
+        {
+            # Added test to check first if key exists
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Services\Pending' | Where-Object { 
+                (Test-Path $_) -and (Get-ChildItem -Path $_) } | ForEach-Object { $true }
+        }
+    )
+
+    foreach ($test in $tests) {
+        Write-Verbose "Running scriptblock: [$($test.ToString())]"
+        if (& $test) {
+            $true
+            break
+        }
+    }
+
+    if (-not ($output.IsPendingReboot = Invoke-Command -Session $psRemotingSession -ScriptBlock $scriptBlock)) {
+        $output.IsPendingReboot = $false
+    }
+}
 
 Function Invoke-Migration {
     $StartButton.Enabled = $false
@@ -270,6 +390,9 @@ Function Invoke-Migration {
 
         # Keep Managed Applications by removing MDM Uninstall String
         Backup-DeploymentManifestXML
+
+        # Backup the C:\Recovery\OEM folder
+        Backup-Recovery
 
         #Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
         $StatusMessageLabel.Text = "Removing Intelligent Hub to Initiate Device Side Unenrol"
