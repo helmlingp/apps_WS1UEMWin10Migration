@@ -81,7 +81,9 @@ function Get-EnrollmentStatus {
     $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
     $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
 
-    if($null -eq $EnrollmentUPN) {
+    $AWMDMES = Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH" -Name "ENROLLMENTSTATUS"
+
+    if($null -eq $EnrollmentUPN -or $AWMDMES -eq 0) {
         $output = $false
     }
 
