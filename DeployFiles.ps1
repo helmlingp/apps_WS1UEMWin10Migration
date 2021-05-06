@@ -2,22 +2,23 @@
   .Synopsis
       This powershell script copies the WS1 Win10 Migration script and AirwatchAgent.msi files to C:\Temp\WS1Win10Migration & executes WS1Win10Migration.ps1
   .NOTES
-	  Created:   	February, 2021
-	  Created by:	Phil Helmling, @philhelmling
-	  Organization: VMware, Inc.
-	  Filename:     DeployFiles.ps1
-	.DESCRIPTION
-	  This powershell script copies the WS1 Win10 Migration script and AirwatchAgent.msi files to C:\Temp\WS1Win10Migration & executes WS1Win10Migration.ps1
-	  
+      Created:   	February, 2021
+      Created by:	Phil Helmling, @philhelmling
+      Organization: VMware, Inc.
+      Filename:     DeployFiles.ps1
+  .DESCRIPTION
+      This powershell script copies the WS1 Win10 Migration script and AirwatchAgent.msi files to C:\Temp\WS1Win10Migration & executes WS1Win10Migration.ps1
+  .REQUIREMENTS
+      AirwatchAgent.msi must be included in package
   .EXAMPLE
-    Install Command
-    powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_URL -OGName DESTINATION_OG_NAME
+      Install Command
+      powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_URL -OGName DESTINATION_OG_NAME
 
-    Uninstall Command
-    .
+      Uninstall Command
+      .
 
-    When to Call Install Complete
-    File Exists: C:\Temp\WS1Win10Migration\WS1Win10Migration.ps1
+      When to Call Install Complete
+      File Exists: C:\Temp\WS1Win10Migration\WS1Win10Migration.ps1
 #>
 param (
   [Parameter(Mandatory=$true)]
