@@ -16,7 +16,7 @@
     Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download
 
 .EXAMPLE
-  .\WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_URL -OGName DESTINATION_OG_NAME
+  .\WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_OG_NAME
 #>
 param (
     [Parameter(Mandatory=$true)]
@@ -261,6 +261,7 @@ Function Invoke-Migration {
     #Get-BitLockerVolume | Resume-BitLocker
 
     #Enable Toast notifications
+    $appsinstalled = $false
     $appsinstalledstatus = Get-AppsInstalledStatus
     while($appsinstalled -eq $false) {
         if($appsinstalledstatus -eq $true) {
