@@ -1,18 +1,19 @@
 <#	
   .Synopsis
-      This powershell script copies the WS1 Win10 Migration script and AirwatchAgent.msi files to C:\Temp\WS1Win10Migration & executes WS1Win10Migration.ps1
+      This powershell script copies the WS1 Win10 Migration script and AirwatchAgent.msi files to a C:\Temp subfolder, creates a Scheduled Task that executes WS1Win10Migration.ps1
   .NOTES
       Created:   	February, 2021
       Created by:	Phil Helmling, @philhelmling
       Organization: VMware, Inc.
       Filename:     DeployFiles.ps1
+      Updated:      January, 2022
   .DESCRIPTION
-      This powershell script copies the WS1 Win10 Migration script and AirwatchAgent.msi files to C:\Temp\WS1Win10Migration & executes WS1Win10Migration.ps1
+      This powershell script copies WS1Win10Migration.ps1 & AirwatchAgent.msi files to a C:\Temp subfolder, creates a Scheduled Task that executes the WS1Win10Migration.ps1 script after 5 minutes
   .REQUIREMENTS
       AirwatchAgent.msi must be included in package
   .EXAMPLE
       Install Command
-      powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_OG_NAME
+      powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
 
       Uninstall Command
       .
@@ -41,19 +42,16 @@ if($PSScriptRoot -eq ""){
 
 $1 = (Get-Item "$current_path\$script:scriptname").BaseName
 $deploypath = "C:\Temp\$1"
+$script = "$deploypath\$script:scriptname"
 
 function Invoke-CreateTask{
     #Get Current time to set Scheduled Task to run powershell
     $DateTime = (Get-Date).AddMinutes(5).ToString("HH:mm")
-
-    $PShellScript = `"$deploypath\$script:scriptname`" -username `"$script:username`" -password `"$script:password`" -Server `"$script:Server`" -OGName `"$script:OGName`"
-    $arg = '-ExecutionPolicy Bypass -File "' + $PShellScript + '"'
+    $arg = "-ExecutionPolicy Bypass -File `"$script`" -username `"$script:username`" -password `"$script:password`" -Server `"$script:Server`" -OGName `"$script:OGName`""
     $TaskName = "WS1Win10Migration"
     Try{
         $A = New-ScheduledTaskAction -Execute "C:\Windows\System32\WindowsPowerShell\v1.0\Powershell.exe" -Argument $arg 
         $T = New-ScheduledTaskTrigger -Once -RandomDelay "00:05" -At $DateTime
-        PS C:\>Register-ScheduledTask Task01 -Action $Sta -Trigger $Stt
-        
         $P = New-ScheduledTaskPrincipal "System" -RunLevel Highest
         $S = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -StartWhenAvailable -Priority 5
         $S.CimInstanceProperties['MultipleInstances'].Value=3
@@ -64,8 +62,6 @@ function Invoke-CreateTask{
         #$e = $_.Exception.Message;
         Write-Host "Error: Job creation failed.  Validate user rights.";
     }
-    #Don't start the task, let this complete and start in 5 minutes to let this process end, and SFDAgent to close the process, that way it will uninstall properly
-    #Start-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath;
 }
 
 #Copy package files
@@ -76,6 +72,3 @@ Copy-Item -Path "$current_path\*.*" -Destination $deploypath -Force -Recurse
 
 #Create Scheduled Task to run the main program
 Invoke-CreateTask
-
-#Call Migration Script with parameters
-#& "powershell.exe" -ep bypass -file `"$deploypath\$script:scriptname`" -username `"$script:username`" -password `"$script:password`" -Server `"$script:Server`" -OGName `"$script:OGName`"

@@ -1,22 +1,24 @@
 <#
 .Synopsis
     This Powershell script:
-    1. Backup the DeploymentManifestXML registry key for each WS1 UEM deployed application
+    1. Backs up the DeploymentManifestXML registry key for each WS1 UEM deployed application
     2. Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
     3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
+
+    This script is deployed using DeployFiles.ps1
+    
  .NOTES
     Created:   	    January, 2021
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
     Filename:       WS1Win10Migration.ps1
-    GitHub:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
+    Updated:        January, 2022
 .DESCRIPTION
-    Unenrols and then enrols a Windows 10 device into a new instance whilst preserving all WS1 UEM managed applications 
-    from being uninstalled upon unenrol.
-    Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download
+    Unenrols and then enrols a Windows 10+ device into a new instance whilst preserving all WS1 UEM managed applications from being uninstalled upon unenrolment.
+    Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
 
 .EXAMPLE
-  .\WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_OG_NAME
+  .\WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
 #>
 param (
     [Parameter(Mandatory=$true)]
@@ -29,8 +31,8 @@ param (
     [string]$Server=$script:Server
 )
 
-#Enable Debug Logging, not needed if api-debug.config found
-$Debug = $true;
+#Enable Debug Logging
+$Debug = $false;
 
 $current_path = $PSScriptRoot;
 if($PSScriptRoot -eq ""){
