@@ -50,13 +50,42 @@ if($Debug){
 
 $Global:ProgressPreference = 'SilentlyContinue'
 
+function Copy-TargetResource {
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path,
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$File,
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FiletoCopy
+    )
+
+    if (!(Test-Path -LiteralPath $Path)) {
+        try {
+        New-Item -Path $Path -ItemType Directory -ErrorAction Stop | Out-Null #-Force
+        }
+        catch {
+        Write-Error -Message "Unable to create directory '$Path'. Error was: $_" -ErrorAction Stop
+        }
+        "Successfully created directory '$Path'."
+    }
+    Write-Host "Copying $FiletoCopy to $Path\$File"
+    Copy-Item -Path $FiletoCopy -Destination "$Path\$File" -Force
+    #Test if the necessary files exist
+    $FileExists = Test-Path -Path "$Path\$File" -PathType Leaf
+}
+
 function Remove-Agent {
     #Uninstall Agent - requires manual delete of device object in console
     $b = Get-WmiObject -Class win32_product -Filter "Name like 'Workspace ONE Intelligent%'"
     $b.Uninstall()
 
     #uninstall WS1 App
-    Get-AppxPackage *AirWatchLLC* | Remove-AppxPackage
+    $appxpackage = Get-AppxPackage *AirWatchLLC* 
+    if($appxpackage){Remove-AppxPackage}
 
     #Cleanup residual registry keys
     Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatch\*" -Recurse -Force -ErrorAction SilentlyContinue
@@ -106,16 +135,54 @@ function Backup-DeploymentManifestXML {
 }
 
 function Backup-Recovery {
-    $path = 'C:\Recovery\OEM'
-    if($path){
-        Copy-Item -Path $path -Destination "$path.bak" -Recurse -Force
+    $OEM = 'C:\Recovery\OEM'
+    $AUTOAPPLY = 'C:\Recovery\AutoApply'
+    $Customizations = 'C:\Recovery\Customizations'
+    if($OEM){
+        Copy-Item -Path $OEM -Destination "$OEM.bak" -Recurse -Force
+    }
+    if($AUTOAPPLY){
+        Copy-Item -Path $AUTOAPPLY -Destination "$AUTOAPPLY.bak" -Recurse -Force
+    }
+    if($Customizations){
+        Copy-Item -Path $Customizations -Destination "$Customizations.bak" -Recurse -Force
+    }
+}
+
+function Restore-Recovery {
+    $OEM = 'C:\Recovery\OEM'
+    $AUTOAPPLY = 'C:\Recovery\AutoApply'
+    $Customizations = 'C:\Recovery\Customizations'
+    $AirwatchAgentfile = "unattend.xml"
+    $unattend = Get-ChildItem -Path $OEM -Include $unattendfile -Recurse -ErrorAction SilentlyContinue
+    $PPKG = Get-ChildItem -Path $Customizations -Include *.ppkg* -Recurse -ErrorAction SilentlyContinue
+    $PPKGfile = $PPKG.Name
+    $AirwatchAgent = Get-ChildItem -Path $current_path -Include *AirwatchAgent.msi* -Recurse -ErrorAction SilentlyContinue
+    $AirwatchAgentfile = $AirwatchAgent.Name
+
+    if($unattend){
+        Copy-TargetResource -Path "$AUTOAPPLY.bak" -File $AirwatchAgentfile -FiletoCopy $unattend
+    }
+    if($PPKG){
+        Copy-TargetResource -Path "$Customizations.bak" -File $PPKGfile -FiletoCopy $PPKG
+    }
+    if($AirwatchAgent){
+        Copy-TargetResource -Path $current_path -File $AirwatchAgentfile -FiletoCopy $AirwatchAgentfile
     }
 }
 
 function Invoke-Cleanup {
-    $path = 'C:\Recovery\OEM.bak'
-    if($path){
-        Remove-Item -Path $path -Recurse -Force
+    $OEMbak = 'C:\Recovery\OEM.bak'
+    $AUTOAPPLYbak = 'C:\Recovery\AutoApply.bak'
+    $Customizationsbak = 'C:\Recovery\Customizations.bak'
+    if($OEMbak){
+        Remove-Item -Path $OEMbak -Recurse -Force
+    }
+    if($AUTOAPPLYbak){
+        Remove-Item -Path $AUTOAPPLYbak -Recurse -Force
+    }
+    if($Customizationsbak){
+        Remove-Item -Path $Customizationsbak -Recurse -Force
     }
     
     $appmanifestpath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM\AppDeploymentAgent\AppManifests"
@@ -255,6 +322,9 @@ Function Invoke-Migration {
             Start-Sleep -Seconds 10
         }
     }
+
+    #Restore Recovery
+    Restore-Recovery
 
     #Cleanup
     Invoke-Cleanup
