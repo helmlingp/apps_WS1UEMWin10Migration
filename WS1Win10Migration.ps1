@@ -16,7 +16,7 @@
 .DESCRIPTION
     Unenrols and then enrols a Windows 10+ device into a new instance whilst preserving all WS1 UEM managed applications from being uninstalled upon unenrolment.
     Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
-
+    Note: to ensure the device stays encrypted if using an Encryption Profile, ensure “Keep System Encrypted at All Times” is enabled/ticked
 .EXAMPLE
   .\WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
 #>
@@ -280,7 +280,7 @@ Function Invoke-Migration {
         Backup-Recovery
 
         #Suspend BitLocker
-        Get-BitLockerVolume | Suspend-BitLocker
+        #Get-BitLockerVolume | Suspend-BitLocker
 
         #Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
         Start-Sleep -Seconds 1
