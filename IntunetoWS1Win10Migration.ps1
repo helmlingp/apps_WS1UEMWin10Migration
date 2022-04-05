@@ -1,24 +1,24 @@
 <#
 .Synopsis
     This Powershell script:
-    1. Backs up the DeploymentManifestXML registry key for each WS1 UEM deployed application
-    2. Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
+    1. Unenrols a device from Intune
+    2. Uninstalls the Intune Company Portal App
     3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
 
-    This script is deployed using DeployFiles.ps1
+    This script is deployed using DeployFiles.ps1 included in the repository
     
  .NOTES
-    Created:   	    January, 2021
+    Created:   	    April, 2021
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
-    Filename:       WS1Win10Migration.ps1
-    Updated:        January, 2022
+    Filename:       IntunetoWS1Win10Migration.ps1
+    Updated:        April, 2022
 .DESCRIPTION
-    Unenrols and then enrols a Windows 10+ device into a new instance whilst preserving all WS1 UEM managed applications from being uninstalled upon unenrolment.
+    Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune or Azure AD.
     Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
     Note: to ensure the device stays encrypted if using an Encryption Profile, ensure “Keep System Encrypted at All Times” is enabled/ticked
 .EXAMPLE
-  .\WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
+  .\IntunetoWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
 #>
 param (
     [Parameter(Mandatory=$true)]
@@ -40,7 +40,7 @@ if($PSScriptRoot -eq ""){
     $current_path = "C:\Temp";
 } 
 $DateNow = Get-Date -Format "yyyyMMdd_hhmm";
-$pathfile = "$current_path\WS1W10Migration_$DateNow";
+$pathfile = "$current_path\IntunetoWS1W10Migration_$DateNow";
 $Script:logLocation = "$pathfile.log";
 $Script:Path = $logLocation;
 if($Debug){
@@ -78,121 +78,70 @@ function Copy-TargetResource {
     $FileExists = Test-Path -Path "$Path\$File" -PathType Leaf
 }
 
-function Remove-Agent {
-    #Uninstall Agent - requires manual delete of device object in console
-    $b = Get-WmiObject -Class win32_product -Filter "Name like 'Workspace ONE Intelligent%'"
-    $b.Uninstall()
-
-    #uninstall WS1 App
-    $appxpackage = Get-AppxPackage *AirWatchLLC* 
-    if($appxpackage){Remove-AppxPackage}
-
-    #Cleanup residual registry keys
-    Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatch\*" -Recurse -Force -ErrorAction SilentlyContinue
-
-    #delete certificates
-    $Certs = get-childitem cert:"CurrentUser" -Recurse
-    $AirwatchCert = $certs | Where-Object {$_.Issuer -eq "CN=AirWatchCa"}
-    foreach ($Cert in $AirwatchCert) {
-        $cert | Remove-Item -Force -ErrorAction SilentlyContinue
-    }
-    
-    $AirwatchCert = $certs | Where-Object {$_.Subject -like "*AwDeviceRoot*"}
-    foreach ($Cert in $AirwatchCert) {
-        $cert | Remove-Item -Force -ErrorAction SilentlyContinue
-    } 
-}
-
-function Get-EnrollmentStatus {
-    $output = $true;
-
+function Get-OMADMAccount {
     $OMADMPath = "HKLM:\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\*"
     $Account = (Get-ItemProperty -Path $OMADMPath -ErrorAction SilentlyContinue).PSChildname
+    
+    return $Account
+}
+
+function Get-IntuneEnrollmentStatus {
+    $output = $true;
+
+    $EnrollmentPath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Enrollments\$Account"
+    $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
+    $ProviderID = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).ProviderID
+
+    if(!($EnrollmentUPN) -and $ProviderID -eq "MS DM Server") {
+        $output = $false
+        write-host "is not intune enrolled"
+    }
+
+    return $output
+}
+
+function Get-WS1EnrollmentStatus {
+    $output = $true;
 
     $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
     $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
-
     $AWMDMES = Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH" -Name "ENROLLMENTSTATUS"
 
-    if($null -eq $EnrollmentUPN -or $AWMDMES -eq 0) {
+    if(!($EnrollmentUPN) -or $AWMDMES -eq 0 -or !($AWMDMES)) {
         $output = $false
     }
 
     return $output
 }
 
-function Backup-DeploymentManifestXML {
+function Invoke-UnenrolIntune {
+    #Delete Task Schedule tasks
+    Get-ScheduledTask -TaskPath "\Microsoft\Windows\EnterpriseMgmt\$Account\*" | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
 
-    $appmanifestpath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM\AppDeploymentAgent\AppManifests"
-    $appmanifestsearchpath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM\AppDeploymentAgent\AppManifests\*"
-    $Apps = (Get-ItemProperty -Path "$appmanifestsearchpath" -ErrorAction SilentlyContinue).PSChildname
-
-    foreach ($App in $Apps){
-        $apppath = $appmanifestpath + "\" + $App
-        Rename-ItemProperty -Path $apppath -Name "DeploymentManifestXML" -NewName "DeploymentManifestXML_BAK"
-        New-ItemProperty -Path $apppath -Name "DeploymentManifestXML"
-    }
-}
-
-function Backup-Recovery {
-    $OEM = 'C:\Recovery\OEM'
-    $AUTOAPPLY = 'C:\Recovery\AutoApply'
-    $Customizations = 'C:\Recovery\Customizations'
-    if($OEM){
-        Copy-Item -Path $OEM -Destination "$OEM.bak" -Recurse -Force
-    }
-    if($AUTOAPPLY){
-        Copy-Item -Path $AUTOAPPLY -Destination "$AUTOAPPLY.bak" -Recurse -Force
-    }
-    if($Customizations){
-        Copy-Item -Path $Customizations -Destination "$Customizations.bak" -Recurse -Force
-    }
-}
-
-function Restore-Recovery {
-    $OEM = 'C:\Recovery\OEM'
-    $AUTOAPPLY = 'C:\Recovery\AutoApply'
-    $Customizations = 'C:\Recovery\Customizations'
-    $AirwatchAgentfile = "unattend.xml"
-    $unattend = Get-ChildItem -Path $OEM -Include $unattendfile -Recurse -ErrorAction SilentlyContinue
-    $PPKG = Get-ChildItem -Path $Customizations -Include *.ppkg* -Recurse -ErrorAction SilentlyContinue
-    $PPKGfile = $PPKG.Name
-    $AirwatchAgent = Get-ChildItem -Path $current_path -Include *AirwatchAgent.msi* -Recurse -ErrorAction SilentlyContinue
-    $AirwatchAgentfile = $AirwatchAgent.Name
-
-    if($unattend){
-        Copy-TargetResource -Path "$AUTOAPPLY.bak" -File $AirwatchAgentfile -FiletoCopy $unattend
-    }
-    if($PPKG){
-        Copy-TargetResource -Path "$Customizations.bak" -File $PPKGfile -FiletoCopy $PPKG
-    }
-    if($AirwatchAgent){
-        Copy-TargetResource -Path $current_path -File $AirwatchAgentfile -FiletoCopy $AirwatchAgentfile
-    }
-}
-
-function Invoke-Cleanup {
-    $OEMbak = 'C:\Recovery\OEM.bak'
-    $AUTOAPPLYbak = 'C:\Recovery\AutoApply.bak'
-    $Customizationsbak = 'C:\Recovery\Customizations.bak'
-    if($OEMbak){
-        Remove-Item -Path $OEMbak -Recurse -Force
-    }
-    if($AUTOAPPLYbak){
-        Remove-Item -Path $AUTOAPPLYbak -Recurse -Force
-    }
-    if($Customizationsbak){
-        Remove-Item -Path $Customizationsbak -Recurse -Force
-    }
+    #Delte reg keys
+    Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Enrollments\$Account" -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Enrollments\Status\$Account" -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\EnterpriseResourceManager\Tracked\$Account" -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PolicyManager\AdmxInstalled\$Account" -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PolicyManager\Providers\$Account" -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\$Account" -Recurse -Force -ErrorAction SilentlyContinue
+	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Provisioning\OMADM\Logger\$Account" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Provisioning\OMADM\Sessions\$Account" -Recurse -Force -ErrorAction SilentlyContinue
     
-    $appmanifestpath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM\AppDeploymentAgent\AppManifests"
-    $appmanifestsearchpath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM\AppDeploymentAgent\AppManifests\*"
-    $Apps = (Get-ItemProperty -Path "$appmanifestsearchpath" -ErrorAction SilentlyContinue).PSChildname
-
-    foreach ($App in $Apps){
-        $apppath = $appmanifestpath + "\" + $App
-        Remove-ItemProperty -Path $apppath -Name "DeploymentManifestXML_BAK"
+    #Delete Enrolment Certificates
+    $UserCerts = get-childitem cert:"CurrentUser" -Recurse
+    $IntuneCerts = $UserCerts | Where-Object {$_.Issuer -eq "CN=Microsoft Intune MDM Device CA" -OR $_.Issuer -eq "CN=SC_Online_Issuing"}
+    foreach ($Cert in $IntuneCerts) {
+        $cert | Remove-Item -Force
     }
+    $DeviceCerts = get-childitem cert:"LocalMachine" -Recurse
+    $IntuneCerts = $DeviceCerts | Where-Object {$_.Issuer -eq "CN=Microsoft Intune Root Certification Authority"}
+    foreach ($Cert in $IntuneCerts) {
+        $cert | Remove-Item -Force
+    }
+
+    #Delete Intune Company Portal App
+    Get-AppxPackage -AllUsers -Name "Microsoft.CompanyPortal" | Remove-AppxPackage
 }
 
 function disable-notifications {
@@ -211,6 +160,18 @@ function disable-notifications {
     Write-Log2 -Path "$logLocation" -Message "Toast Notifications for DeviceEnrollmentActivity, WS1 iHub, Protection Agent, and Hub App disabled" -Level Info
 }
 
+function enable-notifications {
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\AirWatchLLC.WorkspaceONEIntelligentHub_htcwkw4rx2gx4!App" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.airwatch.windowsprotectionagent" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Write-Log2 -Path "$logLocation" -Message "Toast Notifications for DeviceEnrollmentActivity, WS1 iHub, Protection Agent, and Hub App enabled" -Level Info
+}
+
 function Get-AppsInstalledStatus {
     [bool]$appsareinstalled = $true
     $appsinstalledsearchpath = "HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM\AppDeploymentAgent\S-1*\*"
@@ -226,18 +187,6 @@ function Get-AppsInstalledStatus {
     }
 
     return $appsareinstalled
-}
-
-function enable-notifications {
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\AirWatchLLC.WorkspaceONEIntelligentHub_htcwkw4rx2gx4!App" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.airwatch.windowsprotectionagent" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Write-Log2 -Path "$logLocation" -Message "Toast Notifications for DeviceEnrollmentActivity, WS1 iHub, Protection Agent, and Hub App enabled" -Level Info
 }
 
 Function Invoke-EnrollDevice {
@@ -258,14 +207,17 @@ Function Invoke-Migration {
     Start-Sleep -Seconds 1
 
     # Disable Toast notifications
-    disable-notifications
+    #disable-notifications
 
     #Suspend BitLocker so the device doesn't waste time unencrypting and re-encrypting. Device Remains encrypted, see:
     #https://docs.microsoft.com/en-us/powershell/module/bitlocker/suspend-bitlocker?view=win10-ps
-    #Get-BitLockerVolume | Suspend-BitLocker
+    Get-BitLockerVolume | Suspend-BitLocker
 
-    # Check Enrollment Status
-    $enrolled = Get-EnrollmentStatus
+    #Get OMADM Account
+    $Account = Get-OMADMAccount
+
+    #Check Enrollment Status
+    $enrolled = Get-IntuneEnrollmentStatus
     Write-Log2 -Path "$logLocation" -Message "Checking Device Enrollment Status" -Level Info
     Start-Sleep -Seconds 1
 
@@ -273,18 +225,9 @@ Function Invoke-Migration {
         Write-Log2 -Path "$logLocation" -Message "Device is enrolled" -Level Info
         Start-Sleep -Seconds 1
 
-        # Keep Managed Applications by removing MDM Uninstall String
-        Backup-DeploymentManifestXML
-
-        # Backup the C:\Recovery\OEM folder
-        Backup-Recovery
-
-        #Suspend BitLocker
-        #Get-BitLockerVolume | Suspend-BitLocker
-
-        #Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
+        #Unenrol from Intune
         Start-Sleep -Seconds 1
-        Remove-Agent
+        Invoke-UnenrolIntune
         
         # Sleep for 10 seconds before checking
         Start-Sleep -Seconds 10
@@ -292,7 +235,7 @@ Function Invoke-Migration {
         Start-Sleep -Seconds 1
         # Wait till complete
         while($enrolled) { 
-            $status = Get-EnrollmentStatus
+            $status = Get-IntuneEnrollmentStatus
             if($status -eq $false) {
                 Write-Log2 -Path "$logLocation" -Message "Device is no longer enrolled into the Source environment" -Level Info
                 #$StatusMessageLabel.Text = "Device is no longer enrolled into the Source environment"
@@ -312,7 +255,7 @@ Function Invoke-Migration {
     $enrolled = $false
 
     while($enrolled -eq $false) {
-        $status = Get-EnrollmentStatus
+        $status = Get-WS1EnrollmentStatus
         if($status -eq $true) {
             $enrolled = $status
             Write-Log2 -Path "$logLocation" -Message "Device Enrollment is complete" -Level Info
@@ -330,7 +273,7 @@ Function Invoke-Migration {
     Invoke-Cleanup
 
     #Enable BitLocker
-    #Get-BitLockerVolume | Resume-BitLocker
+    Get-BitLockerVolume | Resume-BitLocker
 
     #Enable Toast notifications
     $appsinstalled = $false
