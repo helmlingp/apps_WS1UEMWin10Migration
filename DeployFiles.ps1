@@ -41,7 +41,7 @@ if($PSScriptRoot -eq ""){
 }
 
 $1 = (Get-Item "$current_path\$script:scriptname").BaseName
-$deploypath = "C:\Temp\$1"
+$deploypath = "$env:ProgramData\$1"
 $script = "$deploypath\$script:scriptname"
 
 function Invoke-CreateTask{

@@ -80,27 +80,41 @@ function Copy-TargetResource {
 
 function Remove-Agent {
     #Uninstall Agent - requires manual delete of device object in console
+    Write-Log2 -Path "$logLocation" -Message "Uninstalling Workspace ONE Intelligent Hub" -Level Info
     $b = Get-WmiObject -Class win32_product -Filter "Name like 'Workspace ONE Intelligent%'"
     $b.Uninstall()
-
+    #$ws1agents = Get-ItemProperty "Registry::HKEY_LOCAL_MACHINE\Software\wow6432node\Microsoft\Windows\CurrentVersion\Uninstall\*" | where-object {$_.DisplayName -like "*Workspace ONE Intelligent*"}
+    #foreach ($ws1agent in $ws1agents){
+    #    $ws1agentuninstall = $ws1agent.UninstallString
+    #    $ws1agentuninstallguid = $ws1agentuninstall.Substring($agentuninstall.indexof("/X")+2)
+    #    Write-Log2 -Path "$logLocation" -Message "$ws1agentuninstall" -Level Info
+    #    Start-Process msiexec.exe -Wait -ArgumentList "/X $ws1agentuninstallguid /quiet /norestart"
+    #}
+    
     #uninstall WS1 App
-    $appxpackage = Get-AppxPackage *AirWatchLLC* 
-    if($appxpackage){Remove-AppxPackage}
+    Write-Log2 -Path "$logLocation" -Message "Uninstalling Workspace ONE Intelligent Hub APPX" -Level Info
+    $appxpackages = Get-AppxPackage -AllUsers -Name "*AirwatchLLC*"
+    foreach ($appx in $appxpackages){
+        Remove-AppxPackage -AllUsers -Package $appx.PackageFullName -Confirm:$false
+    }
 
     #Cleanup residual registry keys
-    Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatch\*" -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Log2 -Path "$logLocation" -Message "Delete residual registry keys" -Level Info
+    Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatch" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM" -Recurse -Force -ErrorAction SilentlyContinue
 
     #delete certificates
-    $Certs = get-childitem cert:"CurrentUser" -Recurse
-    $AirwatchCert = $certs | Where-Object {$_.Issuer -eq "CN=AirWatchCa"}
-    foreach ($Cert in $AirwatchCert) {
+    $Certs = get-childitem cert:"CurrentUser" -Recurse | Where-Object {$_.Issuer -eq "CN=AirWatchCa" -or $_.Issuer -eq "VMware Issuing" -or $_.Subject -like "*AwDeviceRoot*"}
+    #$Certs = get-childitem cert:"CurrentUser" -Recurse
+    #$AirwatchCert = $certs | Where-Object {$_.Issuer -eq "CN=AirWatchCa"}
+    foreach ($Cert in $Certs) {
         $cert | Remove-Item -Force -ErrorAction SilentlyContinue
     }
     
-    $AirwatchCert = $certs | Where-Object {$_.Subject -like "*AwDeviceRoot*"}
-    foreach ($Cert in $AirwatchCert) {
-        $cert | Remove-Item -Force -ErrorAction SilentlyContinue
-    } 
+    #$AirwatchCert = $certs | Where-Object {$_.Subject -like "*AwDeviceRoot*"}
+    #foreach ($Cert in $AirwatchCert) {
+    #    $cert | Remove-Item -Force -ErrorAction SilentlyContinue
+    #} 
 }
 
 function Get-OMADMAccount {
@@ -115,9 +129,9 @@ function Get-EnrollmentStatus {
 
   $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
   $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
-  $AWMDMES = Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH" -Name "ENROLLMENTSTATUS"
-
-  if(!($EnrollmentUPN) -or $AWMDMES -eq 0 -or !($AWMDMES)) {
+  $AWMDMES = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus").Status
+  
+  if(!($EnrollmentUPN) -or $AWMDMES -ne "Completed" -or $AWMDMES -eq $NULL) {
       $output = $false
   }
 
@@ -156,7 +170,7 @@ function Restore-Recovery {
     $OEM = 'C:\Recovery\OEM'
     $AUTOAPPLY = 'C:\Recovery\AutoApply'
     $Customizations = 'C:\Recovery\Customizations'
-    $AirwatchAgentfile = "unattend.xml"
+    #$AirwatchAgentfile = "unattend.xml"
     $unattend = Get-ChildItem -Path $OEM -Include $unattendfile -Recurse -ErrorAction SilentlyContinue
     $PPKG = Get-ChildItem -Path $Customizations -Include *.ppkg* -Recurse -ErrorAction SilentlyContinue
     $PPKGfile = $PPKG.Name
@@ -196,6 +210,10 @@ function Invoke-Cleanup {
         $apppath = $appmanifestpath + "\" + $App
         Remove-ItemProperty -Path $apppath -Name "DeploymentManifestXML_BAK"
     }
+
+    Unregister-ScheduledTask -TaskName "WS1Win10Migration" -Confirm:$false
+
+    Remove-Item -Path $current_path -Recurse -Force
 }
 
 function disable-notifications {
@@ -261,18 +279,21 @@ Function Invoke-Migration {
     Start-Sleep -Seconds 1
 
     # Disable Toast notifications
+    Write-Log2 -Path "$logLocation" -Message "Disabling Toast Notifications" -Level Info
     disable-notifications
 
     #Suspend BitLocker so the device doesn't waste time unencrypting and re-encrypting. Device Remains encrypted, see:
     #https://docs.microsoft.com/en-us/powershell/module/bitlocker/suspend-bitlocker?view=win10-ps
+    Write-Log2 -Path "$logLocation" -Message "Suspending BitLocker" -Level Info
     Get-BitLockerVolume | Suspend-BitLocker
     
     #Get OMADM Account
     $Account = Get-OMADMAccount
+    Write-Log2 -Path "$logLocation" -Message "OMA-DM Account: $Account" -Level Info
 
     # Check Enrollment Status
     $enrolled = Get-EnrollmentStatus
-    Write-Log2 -Path "$logLocation" -Message "Checking Device Enrollment Status" -Level Info
+    Write-Log2 -Path "$logLocation" -Message "Checking Device Enrollment Status. Unenrol if already enrolled" -Level Info
     Start-Sleep -Seconds 1
 
     if($enrolled) {
@@ -280,13 +301,16 @@ Function Invoke-Migration {
         Start-Sleep -Seconds 1
 
         # Keep Managed Applications by removing MDM Uninstall String
+        Write-Log2 -Path "$logLocation" -Message "Backup AppManifest" -Level Info
         Backup-DeploymentManifestXML
 
         # Backup the C:\Recovery\OEM folder
-        Backup-Recovery
+        Write-Log2 -Path "$logLocation" -Message "Backup Recovery folder" -Level Info
+        #Backup-Recovery
 
         #Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
         Start-Sleep -Seconds 1
+        Write-Log2 -Path "$logLocation" -Message "Begin Unenrollment" -Level Info
         Remove-Agent
         
         # Sleep for 10 seconds before checking
@@ -327,12 +351,11 @@ Function Invoke-Migration {
     }
 
     #Restore Recovery
+    Write-Log2 -Path "$logLocation" -Message "Restore Recovery" -Level Info
     Restore-Recovery
 
-    #Cleanup
-    Invoke-Cleanup
-
     #Enable BitLocker
+    Write-Log2 -Path "$logLocation" -Message "Resume BitLocker" -Level Info
     Get-BitLockerVolume | Resume-BitLocker
 
     #Enable Toast notifications
@@ -349,6 +372,10 @@ Function Invoke-Migration {
             Start-Sleep -Seconds 10
         }
     }
+    
+    #Cleanup
+    Write-Log2 -Path "$logLocation" -Message "Cleanup Backups" -Level Info
+    Invoke-Cleanup
 }
 
 function Write-Log {

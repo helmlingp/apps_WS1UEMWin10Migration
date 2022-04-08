@@ -101,17 +101,17 @@ function Get-IntuneEnrollmentStatus {
 }
 
 function Get-WS1EnrollmentStatus {
-    $output = $true;
+  $output = $true;
 
-    $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
-    $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
-    $AWMDMES = Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH" -Name "ENROLLMENTSTATUS"
+  $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
+  $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
+  $AWMDMES = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus").Status
+  
+  if(!($EnrollmentUPN) -or $AWMDMES -ne "Completed" -or !($AWMDMES)) {
+      $output = $false
+  }
 
-    if(!($EnrollmentUPN) -or $AWMDMES -eq 0 -or !($AWMDMES)) {
-        $output = $false
-    }
-
-    return $output
+  return $output
 }
 
 function Invoke-UnenrolIntune {
@@ -137,11 +137,30 @@ function Invoke-UnenrolIntune {
     $DeviceCerts = get-childitem cert:"LocalMachine" -Recurse
     $IntuneCerts = $DeviceCerts | Where-Object {$_.Issuer -eq "CN=Microsoft Intune Root Certification Authority"}
     foreach ($Cert in $IntuneCerts) {
-        $cert | Remove-Item -Force
+        $cert | Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
     #Delete Intune Company Portal App
     Get-AppxPackage -AllUsers -Name "Microsoft.CompanyPortal" | Remove-AppxPackage
+}
+
+function enable-notifications {
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\AirWatchLLC.WorkspaceONEIntelligentHub_htcwkw4rx2gx4!App" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.airwatch.windowsprotectionagent" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Name "Enabled" -ErrorAction SilentlyContinue -Force
+
+    Write-Log2 -Path "$logLocation" -Message "Toast Notifications for DeviceEnrollmentActivity, WS1 iHub, Protection Agent, and Hub App enabled" -Level Info
+}
+
+function Invoke-Cleanup {
+
+    Unregister-ScheduledTask -TaskName "WS1Win10Migration" -Confirm:$false
+
+    Remove-Item -Path $current_path -Recurse -Force
 }
 
 function disable-notifications {
@@ -158,18 +177,6 @@ function disable-notifications {
     Set-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Name "Enabled" -Type DWord -Value 0 -Force
 
     Write-Log2 -Path "$logLocation" -Message "Toast Notifications for DeviceEnrollmentActivity, WS1 iHub, Protection Agent, and Hub App disabled" -Level Info
-}
-
-function enable-notifications {
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Windows.SystemToast.DeviceEnrollmentActivity" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\AirWatchLLC.WorkspaceONEIntelligentHub_htcwkw4rx2gx4!App" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\com.airwatch.windowsprotectionagent" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Remove-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings\Workspace ONE Intelligent Hub" -Name "Enabled" -ErrorAction SilentlyContinue -Force
-
-    Write-Log2 -Path "$logLocation" -Message "Toast Notifications for DeviceEnrollmentActivity, WS1 iHub, Protection Agent, and Hub App enabled" -Level Info
 }
 
 function Get-AppsInstalledStatus {
@@ -207,18 +214,21 @@ Function Invoke-Migration {
     Start-Sleep -Seconds 1
 
     # Disable Toast notifications
-    #disable-notifications
+    Write-Log2 -Path "$logLocation" -Message "Disabling Toast Notifications" -Level Info
+    disable-notifications
 
     #Suspend BitLocker so the device doesn't waste time unencrypting and re-encrypting. Device Remains encrypted, see:
     #https://docs.microsoft.com/en-us/powershell/module/bitlocker/suspend-bitlocker?view=win10-ps
+    Write-Log2 -Path "$logLocation" -Message "Suspending BitLocker" -Level Info
     Get-BitLockerVolume | Suspend-BitLocker
 
     #Get OMADM Account
     $Account = Get-OMADMAccount
+    Write-Log2 -Path "$logLocation" -Message "OMA-DM Account: $Account" -Level Info
 
     #Check Enrollment Status
     $enrolled = Get-IntuneEnrollmentStatus
-    Write-Log2 -Path "$logLocation" -Message "Checking Device Enrollment Status" -Level Info
+    Write-Log2 -Path "$logLocation" -Message "Checking Device Enrollment Status. Unenrol if already enrolled" -Level Info
     Start-Sleep -Seconds 1
 
     if($enrolled) {
@@ -227,6 +237,7 @@ Function Invoke-Migration {
 
         #Unenrol from Intune
         Start-Sleep -Seconds 1
+        Write-Log2 -Path "$logLocation" -Message "Begin Unenrollment" -Level Info
         Invoke-UnenrolIntune
         
         # Sleep for 10 seconds before checking
@@ -265,9 +276,6 @@ Function Invoke-Migration {
             Start-Sleep -Seconds 10
         }
     }
-
-    #Restore Recovery
-    Restore-Recovery
 
     #Cleanup
     Invoke-Cleanup
