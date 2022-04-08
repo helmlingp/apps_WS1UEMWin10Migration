@@ -102,7 +102,7 @@ function Get-IntuneEnrollmentStatus {
 
 function Get-WS1EnrollmentStatus {
     $output = $true;
-    Write-Log2 -Path “$logLocation” -Message “Getting the Account” -Level Info
+    
     $Account = Get-OMADMAccount
     if(($Account)){
     $mess1 = “The Account is “+$Account
