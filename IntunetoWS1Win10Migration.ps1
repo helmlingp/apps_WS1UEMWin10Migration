@@ -101,18 +101,21 @@ function Get-IntuneEnrollmentStatus {
 }
 
 function Get-WS1EnrollmentStatus {
-  $output = $true;
-
-  $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
-  $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
-  $AWMDMES = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus").Status
-  
-  if(!($EnrollmentUPN) -or $AWMDMES -ne "Completed" -or !($AWMDMES)) {
-      $output = $false
+    $output = $true;
+    Write-Log2 -Path “$logLocation” -Message “Getting the Account” -Level Info
+    $Account = Get-OMADMAccount
+    if(($Account)){
+    $mess1 = “The Account is “+$Account
+    Write-Log2 -Path “$logLocation” -Message $mess1 -Level Info
+    }
+    $EnrollmentPath = “HKLM:\SOFTWARE\Microsoft\Enrollments\$Account”
+    $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
+    $AWMDMES = (Get-ItemProperty -Path “Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus”  -ErrorAction SilentlyContinue).Status
+    if(!($EnrollmentUPN) -or $AWMDMES -ne “Completed” -or !($AWMDMES)) {
+        $output = $false
+    }
+    return $output
   }
-
-  return $output
-}
 
 function Invoke-UnenrolIntune {
     #Delete Task Schedule tasks
