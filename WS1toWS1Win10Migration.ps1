@@ -306,7 +306,7 @@ Function Invoke-Migration {
 
         # Backup the C:\Recovery\OEM folder
         Write-Log2 -Path "$logLocation" -Message "Backup Recovery folder" -Level Info
-        #Backup-Recovery
+        Backup-Recovery
 
         #Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
         Start-Sleep -Seconds 1
