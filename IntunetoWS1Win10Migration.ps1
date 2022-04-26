@@ -92,7 +92,7 @@ function Get-IntuneEnrollmentStatus {
     $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
     $ProviderID = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).ProviderID
 
-    if(!($EnrollmentUPN) -and $ProviderID -eq "MS DM Server") {
+    if(!($EnrollmentUPN) -or $ProviderID -ne "MS DM Server") {
         $output = $false
         write-host "is not intune enrolled"
     }
