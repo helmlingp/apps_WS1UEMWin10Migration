@@ -9,27 +9,18 @@ The package can be used to migrate Windows 10+ devices from one Workspace ONE UE
 **Usage**
 Intune to WS1 Migration
 Include DeployFiles.ps1, IntunetoWS1Win10Migration.ps1 and AirwatchAgent.msi into ZIP file and upload to Intune. Utilise the following Application parameters to input into the Intune Win32App.
-Install Command:
-powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
-Uninstall Command:
-.
-Install Behaviour:
-System
-Device restart behavior:
-No specific action
+Install Command:  powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
+Uninstall Command:  .
+Install Behaviour:  System
+Device restart behavior:  No specific action
 
 WS1 to WS1 Migration
 Include DeployFiles.ps1, WS1Win10Migration.ps1 and AirwatchAgent.msi into ZIP file and upload to Workspace ONE UEM. Utilise the following Application parameters.
-Install Command:
-powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
-Uninstall Command:
-.
-Install Context:
-Device
-Admin Rights:
-Yes
-When to Call Install Complete:
-File Exists: C:\Temp\WS1Win10Migration\WS1Win10Migration.ps1
+Install Command:  powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
+Uninstall Command:  .
+Install Context:  Device
+Admin Rights: Yes
+When to Call Install Complete:  File Exists: C:\Temp\WS1Win10Migration\WS1Win10Migration.ps1
 
 DeployFiles.ps1 copies the specified script (SCRIPT) & AirwatchAgent.msi files to a C:\Temp subfolder, and creates a Scheduled Task.
 The Scheduled Task executes "C:\Windows\System32\WindowsPowerShell\v1.0\Powershell.exe" with the following arguments: 
@@ -42,4 +33,4 @@ Requirements
 2. staging username, password, Device Services server and GroupID
 
 Phil Helmling, @philhelmling
-Updated April, 2022
+Updated July, 2022
