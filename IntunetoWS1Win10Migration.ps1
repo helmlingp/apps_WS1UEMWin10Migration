@@ -12,9 +12,10 @@
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
     Filename:       IntunetoWS1Win10Migration.ps1
-    Updated:        April, 2022
+    Updated:        July, 2022
+    Github:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
 .DESCRIPTION
-    Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune or Azure AD.
+    Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
     Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
     Note: to ensure the device stays encrypted if using an Encryption Profile, ensure “Keep System Encrypted at All Times” is enabled/ticked
 .EXAMPLE
@@ -40,43 +41,13 @@ if($PSScriptRoot -eq ""){
     $current_path = "C:\Temp";
 } 
 $DateNow = Get-Date -Format "yyyyMMdd_hhmm";
-$pathfile = "$current_path\IntunetoWS1W10Migration_$DateNow";
-$Script:logLocation = "$pathfile.log";
-$Script:Path = $logLocation;
+$LogLocation = "$current_path\IntunetoWS1W10Migration_$DateNow.log";
 if($Debug){
   write-host "Path: $Path"
   write-host "LogLocation: $LogLocation"
 }
 
 $Global:ProgressPreference = 'SilentlyContinue'
-
-function Copy-TargetResource {
-    param (
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Path,
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$File,
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$FiletoCopy
-    )
-
-    if (!(Test-Path -LiteralPath $Path)) {
-        try {
-        New-Item -Path $Path -ItemType Directory -ErrorAction Stop | Out-Null #-Force
-        }
-        catch {
-        Write-Error -Message "Unable to create directory '$Path'. Error was: $_" -ErrorAction Stop
-        }
-        "Successfully created directory '$Path'."
-    }
-    Write-Host "Copying $FiletoCopy to $Path\$File"
-    Copy-Item -Path $FiletoCopy -Destination "$Path\$File" -Force
-    #Test if the necessary files exist
-    $FileExists = Test-Path -Path "$Path\$File" -PathType Leaf
-}
 
 function Get-OMADMAccount {
     $OMADMPath = "HKLM:\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\*"
@@ -86,7 +57,7 @@ function Get-OMADMAccount {
 }
 
 function Get-IntuneEnrollmentStatus {
-    $output = $true;
+    $output = $true
 
     $EnrollmentPath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Enrollments\$Account"
     $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
@@ -94,24 +65,9 @@ function Get-IntuneEnrollmentStatus {
 
     if(!($EnrollmentUPN) -or $ProviderID -ne "MS DM Server") {
         $output = $false
-        write-host "is not intune enrolled"
     }
 
     return $output
-}
-
-function Get-WS1EnrollmentStatus {
-  $output = $true;
-
-  $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
-  $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
-  $AWMDMES = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus").Status
-  
-  if(!($EnrollmentUPN) -or $AWMDMES -ne "Completed" -or !($AWMDMES)) {
-      $output = $false
-  }
-
-  return $output
 }
 
 function Invoke-UnenrolIntune {
@@ -130,18 +86,18 @@ function Invoke-UnenrolIntune {
     
     #Delete Enrolment Certificates
     $UserCerts = get-childitem cert:"CurrentUser" -Recurse
-    $IntuneCerts = $UserCerts | Where-Object {$_.Issuer -eq "CN=Microsoft Intune MDM Device CA" -OR $_.Issuer -eq "CN=SC_Online_Issuing"}
+    $IntuneCerts = $UserCerts | Where-Object {$_.Issuer -eq "CN=SC_Online_Issuing"}
     foreach ($Cert in $IntuneCerts) {
         $cert | Remove-Item -Force
     }
     $DeviceCerts = get-childitem cert:"LocalMachine" -Recurse
-    $IntuneCerts = $DeviceCerts | Where-Object {$_.Issuer -eq "CN=Microsoft Intune Root Certification Authority"}
+    $IntuneCerts = $DeviceCerts | Where-Object {$_.Issuer -eq "CN=Microsoft Intune Root Certification Authority" -OR $_.Issuer -eq "CN=Microsoft Intune MDM Device CA"}
     foreach ($Cert in $IntuneCerts) {
         $cert | Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
     #Delete Intune Company Portal App
-    Get-AppxPackage -AllUsers -Name "Microsoft.CompanyPortal" | Remove-AppxPackage
+    Get-AppxPackage -AllUsers -Name "Microsoft.CompanyPortal" | Remove-AppxPackage -Confirm:$false
 }
 
 function enable-notifications {
@@ -157,9 +113,9 @@ function enable-notifications {
 }
 
 function Invoke-Cleanup {
-
+    #Remove Task that started the migration
     Unregister-ScheduledTask -TaskName "WS1Win10Migration" -Confirm:$false
-
+    #Remove folder containing scripts and agent file
     Remove-Item -Path $current_path -Recurse -Force
 }
 
@@ -179,6 +135,33 @@ function disable-notifications {
     Write-Log2 -Path "$logLocation" -Message "Toast Notifications for DeviceEnrollmentActivity, WS1 iHub, Protection Agent, and Hub App disabled" -Level Info
 }
 
+function Get-EnrollmentStatus {
+    $output = $true;
+
+    $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
+    $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
+    $AWMDMES = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus").Status
+
+    if(!($EnrollmentUPN) -or $AWMDMES -ne "Completed" -or $AWMDMES -eq $NULL) {
+        $output = $false
+    }
+
+    return $output
+}
+
+Function Invoke-EnrollDevice {
+    Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
+    Try
+	{
+		Start-Process msiexec.exe -ArgumentList "/i","$current_path\AirwatchAgent.msi","/qn","ENROLL=Y","DOWNLOADWSBUNDLE=false","SERVER=$Server","LGNAME=$OGName","USERNAME=$username","PASSWORD=$password","ASSIGNTOLOGGEDINUSER=Y","/log $current_path\AWAgent.log";
+    }
+	catch
+	{
+        Write-Log2 -Path "$logLocation" -Message $_.Exception -Level Info
+	}
+}
+
+
 function Get-AppsInstalledStatus {
     [bool]$appsareinstalled = $true
     $appsinstalledsearchpath = "HKEY_LOCAL_MACHINE\SOFTWARE\AirWatchMDM\AppDeploymentAgent\S-1*\*"
@@ -194,18 +177,6 @@ function Get-AppsInstalledStatus {
     }
 
     return $appsareinstalled
-}
-
-Function Invoke-EnrollDevice {
-    Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
-    Try
-	{
-		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /qn ENROLL=Y DOWNLOADWSBUNDLE=false SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
-	}
-	catch
-	{
-        Write-Log2 -Path "$logLocation" -Message $_.Exception -Level Info
-	}
 }
 
 Function Invoke-Migration {
@@ -255,7 +226,6 @@ Function Invoke-Migration {
             }
             Start-Sleep -Seconds 5
         }
-
     }
 
     # Once unenrolled, enrol using Staging flow with ASSIGNTOLOGGEDINUSER=Y
@@ -266,6 +236,10 @@ Function Invoke-Migration {
     $enrolled = $false
 
     while($enrolled -eq $false) {
+        #Get OMADM Account
+        $Account = Get-OMADMAccount
+        Write-Log2 -Path "$logLocation" -Message "OMA-DM Account: $Account" -Level Info
+        
         $status = Get-WS1EnrollmentStatus
         if($status -eq $true) {
             $enrolled = $status
@@ -277,13 +251,11 @@ Function Invoke-Migration {
         }
     }
 
-    #Cleanup
-    Invoke-Cleanup
-
     #Enable BitLocker
+    Write-Log2 -Path "$logLocation" -Message "Resuming Bitlocker" -Level Info
     Get-BitLockerVolume | Resume-BitLocker
 
-    #Enable Toast notifications
+    #Enable Toast notifications once all apps are installed
     $appsinstalled = $false
     $appsinstalledstatus = Get-AppsInstalledStatus
     while($appsinstalled -eq $false) {
@@ -294,129 +266,33 @@ Function Invoke-Migration {
             enable-notifications
         } else {
             Write-Log2 -Path "$logLocation" -Message "Waiting for Applications to install" -Level Info
-            Start-Sleep -Seconds 10
+            Start-Sleep -Seconds 60
         }
     }
-}
 
-function Write-Log {
-    [CmdletBinding()]
-    Param
-    (
-        [Parameter(Mandatory=$true,
-        ValueFromPipelineByPropertyName=$true)]
-        [ValidateNotNullOrEmpty()]
-        [Alias("LogContent")]
-        [string]$Message,
-
-        [Parameter(Mandatory=$false)]
-        [Alias('LogPath')]
-        [Alias('LogLocation')]
-        [string]$Path=$Local:Path,
-
-        [Parameter(Mandatory=$false)]
-        [ValidateSet("Error","Warn","Info")]
-        [string]$Level="Info",
-        
-        [Parameter(Mandatory=$false)]
-        [switch]$NoClobber
-    )
-
-    Begin
-    {
-        # Set VerbosePreference to Continue so that verbose messages are displayed.
-        $VerbosePreference = 'Continue'
-
-        if(!$Path){
-            $current_path = $PSScriptRoot;
-            if($PSScriptRoot -eq ""){
-                #default path
-                $current_path = "C:\Temp";
-            }
-    
-            #setup Report/Log file
-            $DateNow = Get-Date -Format "yyyyMMdd_hhmm";
-            $pathfile = "$current_path\WS1API_$DateNow";
-            $Local:logLocation = "$pathfile.log";
-            $Local:Path = $logLocation;
-        }
-        
-    }
-    Process
-    {
-        
-        # If the file already exists and NoClobber was specified, do not write to the log.
-        if ((Test-Path $Path) -AND $NoClobber) {
-            Write-Error "Log file $Path already exists, and you specified NoClobber. Either delete the file or specify a different name."
-            Return
-            }
-
-        # If attempting to write to a log file in a folder/path that doesn't exist create the file including the path.
-        elseif (!(Test-Path $Path)) {
-            #Write-Verbose "Creating $Path."
-            $NewLogFile = New-Item $Path -Force -ItemType File
-            }
-
-        else {
-            # Nothing to see here yet.
-            }
-
-        # Format Date for our Log File
-        $FormattedDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-
-        # Write message to error, warning, or verbose pipeline and specify $LevelText
-        switch ($Level) {
-            'Error' {
-                Write-Error $Message
-                $LevelText = 'ERROR:'
-                }
-            'Warn' {
-                Write-Warning $Message
-                $LevelText = 'WARNING:'
-                }
-            'Info' {
-                Write-Verbose $Message
-                $LevelText = 'INFO:'
-                }
-            }
-        
-        # Write log entry to $Path
-        "$FormattedDate $LevelText $Message" | Out-File -FilePath $Path -Append
-    }
-    End
-    {
-    }
+    #Cleanup
+    Write-Log2 -Path "$logLocation" -Message "Beginning cleanup" -Level Info
+    Invoke-Cleanup
 }
 
 function Write-Log2{
     [CmdletBinding()]
-    Param
-    (
+    Param(
         [string]$Message,
-        
         [Alias('LogPath')]
         [Alias('LogLocation')]
         [string]$Path=$Local:Path,
-        
         [Parameter(Mandatory=$false)]
         [ValidateSet("Success","Error","Warn","Info")]
-        [string]$Level="Info",
-        
-        [switch]$UseLocal
+        [string]$Level="Info"
     )
-    if((!$UseLocal) -and $Level -ne "Success"){
-        Write-Log -Path "$Path" -Message $Message -Level $Level;
-    } else {
-        $ColorMap = @{"Success"="Green";"Error"="Red";"Warn"="Yellow"};
-        $FontColor = "White";
-        If($ColorMap.ContainsKey($Level)){
-            $FontColor = $ColorMap[$Level];
-        }
-        $DateNow = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        #$DateNow = (Date).ToString("yyyy-mm-dd hh:mm:ss");
-        Add-Content -Path $Path -Value ("$DateNow     ($Level)     $Message")
-        Write-Host "$MethodName::$Level`t$Message" -ForegroundColor $FontColor;
-    }
+
+    $ColorMap = @{"Success"="Green";"Error"="Red";"Warn"="Yellow"};
+    $FontColor = "White";
+    If($ColorMap.ContainsKey($Level)){$FontColor = $ColorMap[$Level];}
+    $DateNow = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $Path -Value ("$DateNow     ($Level)     $Message")
+    Write-Host "$DateNow::$Level`t$Message" -ForegroundColor $FontColor;
 }
 
 Function Main {
@@ -431,7 +307,13 @@ Function Main {
     #Test connectivity to destination server, if available, then proceed with unenrol and enrol
     Write-Log2 -Path "$logLocation" -Message "Checking connectivity to Destination Server" -Level Info
     Start-Sleep -Seconds 1
-    $connectionStatus = Test-NetConnection -ComputerName $SERVER -Port 443 -InformationLevel Quiet -ErrorAction Stop
+    if($SERVER.StartsWith("https://")){
+        $fqdn = ($SERVER).substring(8)
+    } else {
+        $fqdn = $SERVER
+    }
+    
+    $connectionStatus = Test-NetConnection -ComputerName $fqdn -Port 443 -InformationLevel Quiet -ErrorAction Stop
 
     if($connectionStatus -eq $true) {
         Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info
@@ -440,7 +322,6 @@ Function Main {
         Write-Log2 -Path "$logLocation" -Message "Not connected to Wifi, showing UI notification to continue once reconnected" -Level Info
         Start-Sleep -Seconds 1
     }
-
 
 }
 
