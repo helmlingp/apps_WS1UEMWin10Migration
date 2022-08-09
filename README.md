@@ -1,4 +1,4 @@
-# apps_WS1UEMWin10Migration
+## apps_WS1UEMWin10Migration
 A group of scripts to migration from another MDM to WS1 UEM.
 
 This package deploys a script and the AirwatchAgent.msi to a temporary directory, creates a Scheduled Task that executes the selected script (WS1toWS1Win10Migration.ps1 or IntunetoWS1Win10Migration.ps1) after 5 minutes, unenrolling the device from the existing MDM, then enrolling the device into the specified Workspace ONE UEM environment. The process uses command line staging enrolment flow, and assigns the device to the currently logged in Windows User. 
