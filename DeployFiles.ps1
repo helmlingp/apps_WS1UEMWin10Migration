@@ -14,7 +14,7 @@
     AirwatchAgent.msi
     A script to run
   .EXAMPLE
-    Install Command:      powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
+    Install Command:      powershell.exe -ep bypass -file .\DeployFiles.ps1 -scriptname WS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID -Download
 
     Uninstall Command:    .
 
@@ -30,7 +30,8 @@ param (
   [Parameter(Mandatory=$true)]
   [string]$OGName=$OGName,
   [Parameter(Mandatory=$true)]
-  [string]$Server=$Server
+  [string]$Server=$Server,
+  [switch]$Download
 )
 
 $current_path = $PSScriptRoot;
@@ -98,7 +99,12 @@ function Copy-TargetResource {
 function Invoke-CreateTask{
     #Get Current time to set Scheduled Task to run powershell
     $DateTime = (Get-Date).AddMinutes(5).ToString("HH:mm")
-    $arg = "-ep Bypass -File $script -username $username -password $password -Server $Server -OGName $OGName"
+    if($Download){
+      $arg = "-ep Bypass -File $script -username $username -password $password -Server $Server -OGName $OGName -Download"
+    }else{
+      $arg = "-ep Bypass -File $script -username $username -password $password -Server $Server -OGName $OGName"
+    }
+    
     $TaskName = "WS1Win10Migration"
     Try{
         $A = New-ScheduledTaskAction -Execute "C:\Windows\System32\WindowsPowerShell\v1.0\Powershell.exe" -Argument $arg 

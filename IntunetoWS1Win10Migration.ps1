@@ -12,14 +12,15 @@
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
     Filename:       IntunetoWS1Win10Migration.ps1
-    Updated:        July, 2022
+    Updated:        August, 2022
     Github:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
 .DESCRIPTION
     Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
-    Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
-    Note: to ensure the device stays encrypted if using an Encryption Profile, ensure “Keep System Encrypted at All Times” is enabled/ticked
+    Requires AirWatchAgent.msi in the current folder or specify the -Download switch
+        - goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
+    
 .EXAMPLE
-  .\IntunetoWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
+  .\IntunetoWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID -Download
 #>
 param (
     [Parameter(Mandatory=$true)]
@@ -29,7 +30,8 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$OGName=$script:OGName,
     [Parameter(Mandatory=$true)]
-    [string]$Server=$script:Server
+    [string]$Server=$script:Server,
+    [switch]$Download
 )
 
 #Enable Debug Logging
@@ -154,14 +156,14 @@ Function Invoke-DownloadAirwatchAgent {
     {
         [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
         $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
-        $output = "$current_path/AirwatchAgent.msi"
+        $output = "$current_path\AirwatchAgent.msi"
         $Response = Invoke-WebRequest -Uri $url -OutFile $output
         # This will only execute if the Invoke-WebRequest is successful.
         $StatusCode = $Response.StatusCode
     } catch {
         $StatusCode = $_.Exception.Response.StatusCode.value__
+        Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Info
     }
-    $StatusCode
 }
 
 Function Invoke-EnrollDevice {
@@ -246,8 +248,12 @@ Function Invoke-Migration {
     # Once unenrolled, enrol using Staging flow with ASSIGNTOLOGGEDINUSER=Y
     Write-Log2 -Path "$logLocation" -Message "Running Enrollment process" -Level Info
     Start-Sleep -Seconds 1
-    Invoke-DownloadAirwatchAgent
-    Start-Sleep -Seconds 10
+    if($Download){
+        #Download AirwatchAgent.msi if -Download switch used, otherwise requires AirwatchAgent.msi to be deployed in the ZIP.
+        Invoke-DownloadAirwatchAgent
+        Start-Sleep -Seconds 10
+    }
+
     Invoke-EnrollDevice
 
     $enrolled = $false
