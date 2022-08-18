@@ -149,7 +149,7 @@ function Get-EnrollmentStatus {
     return $output
 }
 
-Invoke-DownloadAirwatchAgent {
+Function Invoke-DownloadAirwatchAgent {
     try
     {
         [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
