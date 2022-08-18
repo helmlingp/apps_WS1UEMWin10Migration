@@ -149,6 +149,21 @@ function Get-EnrollmentStatus {
     return $output
 }
 
+Invoke-DownloadAirwatchAgent {
+    try
+    {
+        [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
+        $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
+        $output = "$current_path/AirwatchAgent.msi"
+        $Response = Invoke-WebRequest -Uri $url -OutFile $output
+        # This will only execute if the Invoke-WebRequest is successful.
+        $StatusCode = $Response.StatusCode
+    } catch {
+        $StatusCode = $_.Exception.Response.StatusCode.value__
+    }
+    $StatusCode
+}
+
 Function Invoke-EnrollDevice {
     Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
@@ -231,6 +246,8 @@ Function Invoke-Migration {
     # Once unenrolled, enrol using Staging flow with ASSIGNTOLOGGEDINUSER=Y
     Write-Log2 -Path "$logLocation" -Message "Running Enrollment process" -Level Info
     Start-Sleep -Seconds 1
+    Invoke-DownloadAirwatchAgent
+    Start-Sleep -Seconds 10
     Invoke-EnrollDevice
 
     $enrolled = $false
