@@ -1,8 +1,8 @@
 <#
 .Synopsis
     This Powershell script:
-    1. Unenrols a device from Intune
-    2. Uninstalls the Intune Company Portal App
+    1. Unenrols a device from ManageEngine
+    2. Uninstalls the ManageEngine Agent
     3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
 
     This script is deployed using DeployFiles.ps1 included in the repository
@@ -11,16 +11,16 @@
     Created:   	    April, 2021
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
-    Filename:       IntunetoWS1Win10Migration.ps1
+    Filename:       MEtoWS1Win10Migration.ps1
     Updated:        August, 2022
     Github:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
 .DESCRIPTION
-    Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
+    Unenrols Win10+ device from ManageEngine and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from ManageEngine.
     Requires AirWatchAgent.msi in the current folder or specify the -Download switch
         - goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
     
 .EXAMPLE
-  .\IntunetoWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID -Download
+  .\MEetoWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID -Download
 #>
 param (
     [Parameter(Mandatory=$true)]
@@ -43,7 +43,7 @@ if($PSScriptRoot -eq ""){
     $current_path = "C:\Temp";
 } 
 $DateNow = Get-Date -Format "yyyyMMdd_hhmm";
-$LogLocation = "$current_path\IntunetoWS1W10Migration_$DateNow.log";
+$LogLocation = "$current_path\MEtoWS1W10Migration_$DateNow.log";
 if($Debug){
   write-host "Path: $Path"
   write-host "LogLocation: $LogLocation"
@@ -58,21 +58,21 @@ function Get-OMADMAccount {
     return $Account
 }
 
-function Get-IntuneEnrollmentStatus {
+function Get-MEEnrollmentStatus {
     $output = $true
-
+    
     $EnrollmentPath = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Enrollments\$Account"
     $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
     $ProviderID = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).ProviderID
 
-    if(!($EnrollmentUPN) -or $ProviderID -ne "MS DM Server") {
+    if(!($EnrollmentUPN) -or $ProviderID -ne "MEMDM") {
         $output = $false
     }
 
     return $output
 }
 
-function Invoke-UnenrolIntune {
+function Invoke-UnenrolME {
     #Delete Task Schedule tasks
     Get-ScheduledTask -TaskPath "\Microsoft\Windows\EnterpriseMgmt\$Account\*" | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
 
@@ -85,21 +85,23 @@ function Invoke-UnenrolIntune {
 	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\$Account" -Recurse -Force -ErrorAction SilentlyContinue
 	Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Provisioning\OMADM\Logger\$Account" -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Provisioning\OMADM\Sessions\$Account" -Recurse -Force -ErrorAction SilentlyContinue
-    
+    Remove-Item -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AdventNet\*" -Recurse -Force -ErrorAction SilentlyContinue
+
     #Delete Enrolment Certificates
-    $UserCerts = get-childitem cert:"CurrentUser" -Recurse
-    $IntuneCerts = $UserCerts | Where-Object {$_.Issuer -eq "CN=SC_Online_Issuing"}
-    foreach ($Cert in $IntuneCerts) {
+<#     $UserCerts = get-childitem cert:"CurrentUser" -Recurse
+    $MECerts = $UserCerts | Where-Object {$_.Issuer -eq "CN=????"}
+    foreach ($Cert in $MECerts) {
         $cert | Remove-Item -Force
     }
     $DeviceCerts = get-childitem cert:"LocalMachine" -Recurse
-    $IntuneCerts = $DeviceCerts | Where-Object {$_.Issuer -eq "CN=Microsoft Intune Root Certification Authority" -OR $_.Issuer -eq "CN=Microsoft Intune MDM Device CA"}
-    foreach ($Cert in $IntuneCerts) {
+    $MECerts = $DeviceCerts | Where-Object {$_.Issuer -eq "CN=????" -OR $_.Issuer -eq "CN=????"}
+    foreach ($Cert in $MECerts) {
         $cert | Remove-Item -Force -ErrorAction SilentlyContinue
-    }
+    } #>
 
-    #Delete Intune Company Portal App
-    Get-AppxPackage -AllUsers -Name "Microsoft.CompanyPortal" | Remove-AppxPackage -Confirm:$false
+    #Uninstall MEDC app - requires manual delete of device object in console
+    $b = Get-WmiObject Win32_Product | Where-Object { $_.name -eq "ManageEngine Desktop Central - Agent" }
+    $b.Uninstall()
 }
 
 function enable-notifications {
@@ -215,7 +217,7 @@ Function Invoke-Migration {
     Write-Log2 -Path "$logLocation" -Message "OMA-DM Account: $Account" -Level Info
 
     #Check Enrollment Status
-    $enrolled = Get-IntuneEnrollmentStatus
+    $enrolled = Get-MEEnrollmentStatus
     Write-Log2 -Path "$logLocation" -Message "Checking Device Enrollment Status. Unenrol if already enrolled" -Level Info
     Start-Sleep -Seconds 1
 
@@ -223,10 +225,10 @@ Function Invoke-Migration {
         Write-Log2 -Path "$logLocation" -Message "Device is enrolled" -Level Info
         Start-Sleep -Seconds 1
 
-        #Unenrol from Intune
+        #Unenrol from ManageEngine
         Start-Sleep -Seconds 1
         Write-Log2 -Path "$logLocation" -Message "Begin Unenrollment" -Level Info
-        Invoke-UnenrolIntune
+        Invoke-UnenrolME
         
         # Sleep for 10 seconds before checking
         Start-Sleep -Seconds 10
@@ -234,7 +236,7 @@ Function Invoke-Migration {
         Start-Sleep -Seconds 1
         # Wait till complete
         while($enrolled) { 
-            $status = Get-IntuneEnrollmentStatus
+            $status = Get-MEEnrollmentStatus
             if($status -eq $false) {
                 Write-Log2 -Path "$logLocation" -Message "Device is no longer enrolled into the Source environment" -Level Info
                 #$StatusMessageLabel.Text = "Device is no longer enrolled into the Source environment"
