@@ -8,7 +8,7 @@
     This script is deployed using DeployFiles.ps1 included in the repository
     
  .NOTES
-    Created:   	    January, 2021
+    Created:   	    January, 2022
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
     Filename:       WS1toWS1Win10Migration.ps1
@@ -30,7 +30,8 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$OGName=$script:OGName,
     [Parameter(Mandatory=$true)]
-    [string]$Server=$script:Server
+    [string]$Server=$script:Server,
+    [switch]$Download
 )
 
 #Enable Debug Logging
@@ -69,6 +70,21 @@ function Get-EnrollmentStatus {
     }
 
     return $output
+}
+
+Function Invoke-DownloadAirwatchAgent {
+    try
+    {
+        [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
+        $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
+        $output = "$current_path\AirwatchAgent.msi"
+        $Response = Invoke-WebRequest -Uri $url -OutFile $output
+        # This will only execute if the Invoke-WebRequest is successful.
+        $StatusCode = $Response.StatusCode
+    } catch {
+        $StatusCode = $_.Exception.Response.StatusCode.value__
+        Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Info
+    }
 }
 
 function Remove-Agent {
@@ -322,6 +338,11 @@ Function Invoke-Migration {
     # Once unenrolled, enrol using Staging flow with ASSIGNTOLOGGEDINUSER=Y
     Write-Log2 -Path "$logLocation" -Message "Running Enrollment process" -Level Info
     Start-Sleep -Seconds 1
+    if($Download){
+        #Download AirwatchAgent.msi if -Download switch used, otherwise requires AirwatchAgent.msi to be deployed in the ZIP.
+        Invoke-DownloadAirwatchAgent
+        Start-Sleep -Seconds 10
+    }
     Invoke-EnrollDevice
 
     $enrolled = $false

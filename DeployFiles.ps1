@@ -2,7 +2,7 @@
   .Synopsis
     This powershell script copies a script and AirwatchAgent.msi files to a C:\Recovery\OEM subfolder, creates a Scheduled Task that executes the script
   .NOTES
-    Created:   	February, 2021
+    Created:   	August, 2022
     Created by:	Phil Helmling, @philhelmling
     Organization: VMware, Inc.
     Filename:     DeployFiles.ps1
