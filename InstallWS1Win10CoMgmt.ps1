@@ -192,7 +192,13 @@ Function Main {
         #Test connectivity to destination server, if available, then proceed with unenrol and enrol
         Write-Log2 -Path "$logLocation" -Message "Checking connectivity to Destination Server" -Level Info
         Start-Sleep -Seconds 1
-        $connectionStatus = Test-NetConnection -ComputerName $SERVER -Port 443 -InformationLevel Quiet -ErrorAction Stop
+        if($SERVER.StartsWith("https://")){
+          $fqdn = ($SERVER).substring(8)
+      } else {
+          $fqdn = $SERVER
+      }
+      
+      $connectionStatus = Test-NetConnection -ComputerName $fqdn -Port 443 -InformationLevel Quiet -ErrorAction Stop
 
         if($connectionStatus -eq $true) {
             Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info

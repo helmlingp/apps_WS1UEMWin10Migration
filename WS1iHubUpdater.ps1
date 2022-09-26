@@ -78,7 +78,10 @@ function Invoke-iHubUpdate {
   if ($TestforiHub) {
     Try
   {
-    Start-Process $Updater;
+    #Run AW.WinPC.Updater.exe
+    Start-Process $Updater -Wait
+    #call iHub UI install script as it fails to update sometimes
+    #& "C:\Program Files (x86)\Airwatch\AgentUI\Resources\Hub.UI.Package\HubUI\CustomInstallPackage.ps1"
   }
   catch
   {
