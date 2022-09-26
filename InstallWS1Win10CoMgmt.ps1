@@ -66,7 +66,7 @@ function Get-WS1EnrollmentStatus {
 
   $EnrollmentPath = "HKLM:\SOFTWARE\Microsoft\Enrollments\$Account"
   $EnrollmentUPN = (Get-ItemProperty -Path $EnrollmentPath -ErrorAction SilentlyContinue).UPN
-  $AWMDMES = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus").Status
+  $AWMDMES = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\EnrollmentStatus" -ErrorAction SilentlyContinue).Status
 
   if(!($EnrollmentUPN) -or $AWMDMES -ne "Completed" -or !($AWMDMES)) {
       $output = $false
@@ -77,7 +77,7 @@ function Get-WS1EnrollmentStatus {
 
 function Get-WS1EnrollmentMode {
     $registeredMode = $false;
-    $mode = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\Feature").RegisteredMode 
+    $mode = (Get-ItemProperty -Path "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\AIRWATCH\Feature" -ErrorAction SilentlyContinue).RegisteredMode 
     if($mode) {
         $registeredMode = $true
     }
@@ -178,7 +178,7 @@ Function Main {
         #Initial Device Registration Checks
         Write-Log2 -Path "$logLocation" -Message "Running Initial Device Registration Checks" -Level Info
 
-        $status = Get-WS1EnrollmentMode -ErrorAction SilentlyContinue
+        $status = Get-WS1EnrollmentMode
 
         if($status -eq $true) {
             Write-Log2 -Path "$logLocation" -Message "Device already registered. Exiting." -Level Warn
