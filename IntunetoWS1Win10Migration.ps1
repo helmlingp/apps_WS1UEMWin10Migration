@@ -162,7 +162,7 @@ Function Invoke-DownloadAirwatchAgent {
         $StatusCode = $Response.StatusCode
     } catch {
         $StatusCode = $_.Exception.Response.StatusCode.value__
-        Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Info
+        Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Error
     }
 }
 
@@ -174,10 +174,9 @@ Function Invoke-EnrollDevice {
     }
 	catch
 	{
-        Write-Log2 -Path "$logLocation" -Message $_.Exception -Level Info
+        Write-Log2 -Path "$logLocation" -Message $_.Exception -Level Error
 	}
 }
-
 
 function Get-AppsInstalledStatus {
     [bool]$appsareinstalled = $true
@@ -188,6 +187,7 @@ function Get-AppsInstalledStatus {
         
         if($isinstalled -eq $false){
             $appname = (Get-ItemProperty -Path "Registry::$app").Name
+            Write-Log2 -Path "$logLocation" -Message "$appname is not installed" -Level Info
             $appsareinstalled = $false
             break
         }
@@ -236,7 +236,7 @@ Function Invoke-Migration {
         while($enrolled) { 
             $status = Get-IntuneEnrollmentStatus
             if($status -eq $false) {
-                Write-Log2 -Path "$logLocation" -Message "Device is no longer enrolled into the Source environment" -Level Info
+                Write-Log2 -Path "$logLocation" -Message "Device is no longer enrolled into the Source environment" -Level Success
                 #$StatusMessageLabel.Text = "Device is no longer enrolled into the Source environment"
                 Start-Sleep -Seconds 1
                 $enrolled = $false
@@ -266,7 +266,7 @@ Function Invoke-Migration {
         $status = Get-WS1EnrollmentStatus
         if($status -eq $true) {
             $enrolled = $status
-            Write-Log2 -Path "$logLocation" -Message "Device Enrollment is complete" -Level Info
+            Write-Log2 -Path "$logLocation" -Message "Device Enrollment is complete" -Level Success
             Start-Sleep -Seconds 1
         } else {
             Write-Log2 -Path "$logLocation" -Message "Waiting for enrollment to complete" -Level Info
@@ -284,7 +284,7 @@ Function Invoke-Migration {
     while($appsinstalled -eq $false) {
         if($appsinstalledstatus -eq $true) {
             $appsinstalled = $appsinstalledstatus
-            Write-Log2 -Path "$logLocation" -Message "Applications all installed, enable Toast Notifications" -Level Info
+            Write-Log2 -Path "$logLocation" -Message "Applications all installed, enable Toast Notifications" -Level Success
             Start-Sleep -Seconds 1
             enable-notifications
         } else {
@@ -342,7 +342,7 @@ Function Main {
         Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info
         Invoke-Migration
     } else {
-        Write-Log2 -Path "$logLocation" -Message "Not connected to Wifi, showing UI notification to continue once reconnected" -Level Info
+        Write-Log2 -Path "$logLocation" -Message "Not connected to Wifi, showing UI notification to continue once reconnected" -Level Error
         Start-Sleep -Seconds 1
     }
 
