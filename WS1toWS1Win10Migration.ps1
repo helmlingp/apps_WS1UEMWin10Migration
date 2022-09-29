@@ -17,10 +17,11 @@
 .DESCRIPTION
     Unenrols and then enrols a Windows 10+ device into a new instance whilst preserving all WS1 UEM managed applications from being uninstalled upon unenrolment.
     Maintains Azure AD join status. Does not delete device records from Intune.
-    Requires AirWatchAgent.msi in the current folder > goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
+    Requires AirWatchAgent.msi in the current folder or specify the -Download switch
+        - goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
     Note: to ensure the device stays encrypted if using an Encryption Profile, ensure “Keep System Encrypted at All Times” is enabled/ticked
 .EXAMPLE
-  .\WS1toWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
+  .\WS1toWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID -Download
 #>
 param (
     [Parameter(Mandatory=$true)]
