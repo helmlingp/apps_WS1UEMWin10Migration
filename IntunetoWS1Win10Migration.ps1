@@ -1,55 +1,150 @@
 <#
 .Synopsis
-    This Powershell script:
-    1. Unenrols a device from Intune
-    2. Uninstalls the Intune Company Portal App
-    3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
-
-    This script is deployed using DeployFiles.ps1 included in the repository
-    
+    Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
  .NOTES
     Created:   	    April, 2022
     Created by:	    Phil Helmling, @philhelmling
     Organization:   VMware, Inc.
     Filename:       IntunetoWS1Win10Migration.ps1
-    Updated:        August, 2022
+    Updated:        October, 2022
     Github:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
 .DESCRIPTION
     Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
+    This Powershell script:
+    1. Backs up the DeploymentManifestXML registry key for each WS1 UEM deployed application
+    2. Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
+    3. Installs AirwatchAgent.msi from current directory in staging enrolment flow to the target WS1 UEM instance using username and password
+
+  .REQUIREMENTS
     Requires AirWatchAgent.msi in the current folder or specify the -Download switch
-        - goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
+    Goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
     
 .EXAMPLE
   .\IntunetoWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID -Download
 #>
 param (
-    [Parameter(Mandatory=$true)]
-    [string]$username=$script:Username,
-    [Parameter(Mandatory=$true)]
-    [string]$password=$script:password,
-    [Parameter(Mandatory=$true)]
-    [string]$OGName=$script:OGName,
-    [Parameter(Mandatory=$true)]
-    [string]$Server=$script:Server,
-    [switch]$Download
+  [Parameter(Mandatory=$true)][string]$username=$Username,
+  [Parameter(Mandatory=$true)][string]$password=$password,
+  [Parameter(Mandatory=$true)][string]$OGName=$OGName,
+  [Parameter(Mandatory=$true)][string]$Server=$Server,
+  [switch]$Download
 )
 
 #Enable Debug Logging
-$Debug = $false;
+$Debug = $false
 
 $current_path = $PSScriptRoot;
 if($PSScriptRoot -eq ""){
     #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
-    $current_path = "C:\Temp";
+    $current_path = Get-Location
 } 
-$DateNow = Get-Date -Format "yyyyMMdd_hhmm";
-$LogLocation = "$current_path\IntunetoWS1W10Migration_$DateNow.log";
+$DateNow = Get-Date -Format "yyyyMMdd_hhmm"
+$scriptName = $MyInvocation.MyCommand.Name
+$logLocation = "$current_path\$scriptName_$DateNow.log"
+
 if($Debug){
-  write-host "Path: $Path"
+  write-host "Current Path: $current_path"
   write-host "LogLocation: $LogLocation"
 }
 
-$Global:ProgressPreference = 'SilentlyContinue'
+$deploypath = "C:\Recovery\OEM\$scriptName"
+$deploypathscriptname = "$deploypath\$scriptName.ps1"
+$agentpath = "C:\Recovery\OEM"
+$agent = "AirwatchAgent.msi"
+
+function Write-Log2{
+    [CmdletBinding()]
+    Param(
+      [string]$Message,
+      [Alias('LogPath')][Alias('LogLocation')][string]$Path=$Local:Path,
+      [Parameter(Mandatory=$false)][ValidateSet("Success","Error","Warn","Info")][string]$Level="Info"
+    )
+  
+    $ColorMap = @{"Success"="Green";"Error"="Red";"Warn"="Yellow"};
+    $FontColor = "White";
+    If($ColorMap.ContainsKey($Level)){$FontColor = $ColorMap[$Level];}
+    $DateNow = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $Path -Value ("$DateNow`t($Level)`t$Message")
+    Write-Host "$DateNow::$Level`t$Message" -ForegroundColor $FontColor;
+}
+
+function Invoke-CreateTask{
+    #Get Current time to set Scheduled Task to run powershell
+    $DateTime = (Get-Date).AddMinutes(5).ToString("HH:mm")
+    $arg = "-ep Bypass -File $deploypathscriptname -username $username -password $password -Server $Server -OGName $OGName"
+    
+    $TaskName = "$scriptName"
+    Try{
+        $A = New-ScheduledTaskAction -Execute "C:\Windows\System32\WindowsPowerShell\v1.0\Powershell.exe" -Argument $arg 
+        $T = New-ScheduledTaskTrigger -Once -RandomDelay "00:05" -At $DateTime
+        $P = New-ScheduledTaskPrincipal "System" -RunLevel Highest
+        $S = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -StartWhenAvailable -Priority 5
+        $S.CimInstanceProperties['MultipleInstances'].Value=3
+        $D = New-ScheduledTask -Action $A -Principal $P -Trigger $T -Settings $S
+
+        Register-ScheduledTask -InputObject $D -TaskName $Taskname -Force -ErrorAction Stop
+        Write-Log2 -Path "$logLocation" -Message "Create Task $Taskname" -Level Info
+    } Catch {
+        #$e = $_.Exception.Message;
+        #Write-Host "Error: Job creation failed.  Validate user rights."
+        Write-Log2 -Path "$logLocation" -Message "Error: Job creation failed.  Validate user rights." -Level Info
+    }
+}
+
+function Build-MigrationScript {
+    $MigrationScript = @"
+<#
+.Synopsis
+    Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
+ .NOTES
+    Created:   	    April, 2022
+    Created by:	    Phil Helmling, @philhelmling
+    Organization:   VMware, Inc.
+    Filename:       IntunetoWS1Win10Migration.ps1
+    Updated:        October, 2022
+    Github:         https://github.com/helmlingp/apps_WS1UEMWin10Migration
+.DESCRIPTION
+    Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
+    This Powershell script:
+    1. Backs up the DeploymentManifestXML registry key for each WS1 UEM deployed application
+    2. Uninstalls the Airwatch Agent which unenrols a device from the current WS1 UEM instance
+    3. Installs AirwatchAgent.msi from C:\Recovery\OEM directory in staging enrolment flow to the target WS1 UEM instance using username and password
+
+  .REQUIREMENTS
+    Requires AirWatchAgent.msi in the C:\Recovery\OEM folder
+    Goto https://getwsone.com to download or goto https://<DS_FQDN>/agents/ProtectionAgent_AutoSeed/AirwatchAgent.msi to download it, substituting <DS_FQDN> with the FQDN for the Device Services Server.
+    
+.EXAMPLE
+  .\IntunetoWS1Win10Migration.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
+#>
+param (
+    [Parameter(Mandatory=$true)][string]$username=$script:Username,
+    [Parameter(Mandatory=$true)][string]$password=$script:password,
+    [Parameter(Mandatory=$true)][string]$OGName=$script:OGName,
+    [Parameter(Mandatory=$true)][string]$Server=$script:Server
+)
+
+#Enable Debug Logging
+$Debug = $false
+
+$current_path = $PSScriptRoot;
+if($PSScriptRoot -eq ""){
+    #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
+    $current_path = Get-Location
+} 
+$DateNow = Get-Date -Format "yyyyMMdd_hhmm"
+$scriptName = $MyInvocation.MyCommand.Name
+$logLocation = "$current_path\$scriptName_$DateNow.log"
+
+if($Debug){
+  write-host "Current Path: $current_path"
+  write-host "LogLocation: $LogLocation"
+}
+
+$deploypath = "C:\Recovery\OEM\$scriptName"
+$deploypathscriptname = "$deploypath\$scriptName.ps1"
+$agentpath = "C:\Recovery\OEM"
+$agent = "AirwatchAgent.msi"
 
 function Get-OMADMAccount {
     $OMADMPath = "HKLM:\SOFTWARE\Microsoft\Provisioning\OMADM\Accounts\*"
@@ -151,26 +246,11 @@ function Get-EnrollmentStatus {
     return $output
 }
 
-Function Invoke-DownloadAirwatchAgent {
-    try
-    {
-        [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
-        $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
-        $output = "$current_path\AirwatchAgent.msi"
-        $Response = Invoke-WebRequest -Uri $url -OutFile $output
-        # This will only execute if the Invoke-WebRequest is successful.
-        $StatusCode = $Response.StatusCode
-    } catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
-        Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Error
-    }
-}
-
 Function Invoke-EnrollDevice {
     Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
 	{
-		Start-Process msiexec.exe -ArgumentList "/i","$current_path\AirwatchAgent.msi","/qn","ENROLL=Y","DOWNLOADWSBUNDLE=false","SERVER=$Server","LGNAME=$OGName","USERNAME=$username","PASSWORD=$password","ASSIGNTOLOGGEDINUSER=Y","/log $current_path\AWAgent.log";
+		Start-Process msiexec.exe -ArgumentList "/i","$agentpath\$agent","/qn","ENROLL=Y","DOWNLOADWSBUNDLE=false","SERVER=$Server","LGNAME=$OGName","USERNAME=$username","PASSWORD=$password","ASSIGNTOLOGGEDINUSER=Y","/log $agentpath\AWAgent.log";
     }
 	catch
 	{
@@ -205,7 +285,7 @@ Function Invoke-Migration {
     Write-Log2 -Path "$logLocation" -Message "Disabling Toast Notifications" -Level Info
     disable-notifications
 
-    #Suspend BitLocker so the device doesn't waste time unencrypting and re-encrypting. Device Remains encrypted, see:
+    #Suspend BitLocker so the device doesn`t waste time unencrypting and re-encrypting. Device Remains encrypted, see:
     #https://docs.microsoft.com/en-us/powershell/module/bitlocker/suspend-bitlocker?view=win10-ps
     Write-Log2 -Path "$logLocation" -Message "Suspending BitLocker" -Level Info
     Get-BitLockerVolume | Suspend-BitLocker
@@ -248,12 +328,6 @@ Function Invoke-Migration {
     # Once unenrolled, enrol using Staging flow with ASSIGNTOLOGGEDINUSER=Y
     Write-Log2 -Path "$logLocation" -Message "Running Enrollment process" -Level Info
     Start-Sleep -Seconds 1
-    if($Download){
-        #Download AirwatchAgent.msi if -Download switch used, otherwise requires AirwatchAgent.msi to be deployed in the ZIP.
-        Invoke-DownloadAirwatchAgent
-        Start-Sleep -Seconds 10
-    }
-
     Invoke-EnrollDevice
 
     $enrolled = $false
@@ -301,22 +375,18 @@ Function Invoke-Migration {
 function Write-Log2{
     [CmdletBinding()]
     Param(
-        [string]$Message,
-        [Alias('LogPath')]
-        [Alias('LogLocation')]
-        [string]$Path=$Local:Path,
-        [Parameter(Mandatory=$false)]
-        [ValidateSet("Success","Error","Warn","Info")]
-        [string]$Level="Info"
+      [string]$Message,
+      [Alias('LogPath')][Alias('LogLocation')][string]$Path=$Local:Path,
+      [Parameter(Mandatory=$false)][ValidateSet("Success","Error","Warn","Info")][string]$Level="Info"
     )
-
+  
     $ColorMap = @{"Success"="Green";"Error"="Red";"Warn"="Yellow"};
     $FontColor = "White";
     If($ColorMap.ContainsKey($Level)){$FontColor = $ColorMap[$Level];}
     $DateNow = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Add-Content -Path $Path -Value ("$DateNow     ($Level)     $Message")
     Write-Host "$DateNow::$Level`t$Message" -ForegroundColor $FontColor;
-}
+  }
 
 Function Main {
 
@@ -348,4 +418,57 @@ Function Main {
 
 }
 
+Main
+"@
+    return $MigrationScript
+}
+
+function Invoke-DownloadAirwatchAgent {
+    try
+    {
+        [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
+        $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
+        $output = "$current_path\$agent"
+        $Response = Invoke-WebRequest -Uri $url -OutFile $output
+        # This will only execute if the Invoke-WebRequest is successful.
+        $StatusCode = $Response.StatusCode
+    } catch {
+        $StatusCode = $_.Exception.Response.StatusCode.value__
+        Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Error
+    }
+  }
+  
+function Main {
+    #Setup Logging
+    Write-Log2 -Path "$logLocation" -Message "S" -Level Success
+
+    if (!(Test-Path -LiteralPath $deploypath)) {
+        try {
+        New-Item -Path $deploypath -ItemType Directory -ErrorAction Stop | Out-Null #-Force
+        }
+        catch {
+        Write-Error -Message "Unable to create directory '$deploypath'. Error was: $_" -ErrorAction Stop
+        }
+        "Successfully created directory '$deploypath'."
+    }
+
+    #Download latest AirwatchAgent.msi
+    if($Download){
+        #Download AirwatchAgent.msi if -Download switch used, otherwise requires AirwatchAgent.msi to be deployed in the ZIP.
+        Invoke-DownloadAirwatchAgent
+        Start-Sleep -Seconds 10
+    } 
+    Copy-Item -Path "$current_path\$agent" -Destination "$agentpath\$agent" -Force
+    Write-Log2 -Path "$logLocation" -Message "Copied Agent $agent" -Level Info
+
+    #Create migration script to be run by Scheduled Task
+    $MigrationScript = Build-MigrationScript
+	New-Item -Path $deploypathscriptname -ItemType "file" -Value $MigrationScript -Force -Confirm:$false
+	Write-Log2 -Path "$logLocation" -Message "Created script $scriptname in $deploypath" -Level Info
+
+    #Create Scheduled Task to run the main program
+    Invoke-CreateTask
+    Write-Log2 -Path "$logLocation" -Message "Created Task set to run at approx $DateTime" -Level Info
+}
+#Call Main function
 Main

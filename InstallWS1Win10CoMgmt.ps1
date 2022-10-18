@@ -13,7 +13,7 @@
     Modified by:    Pete Lindley, @tbwfdu
     Organization:   VMware, Inc.
     Filename:       InstallWS1Win10CoMgmt.ps1
-    Updated:        September, 2022
+    Updated:        October, 2022
 .DESCRIPTION
     Downloads the latest Workspace ONE Intelligent Hub application (AirwatchAgent.msi) and registers the device against the Workspace ONE UEM environment in Registered Mode.
     Allows the device to remain enrolled in Intune and maintains Azure AD registration, while enabling co-management with Workspace ONE UEM to additional capabilities.
@@ -22,32 +22,31 @@
   .\InstallWS1Win10CoMgmt.ps1 -username USERNAME -password PASSWORD -Server DESTINATION_SERVER_FQDN -OGName DESTINATION_GROUPID
 #>
 param (
-    [Parameter(Mandatory=$true)]
-    [string]$username=$script:Username,
-    [Parameter(Mandatory=$true)]
-    [string]$password=$script:password,
-    [Parameter(Mandatory=$true)]
-    [string]$OGName=$script:OGName,
-    [Parameter(Mandatory=$true)]
-    [string]$Server=$script:Server
+    [Parameter(Mandatory=$true)][string]$username=$script:Username,
+    [Parameter(Mandatory=$true)][string]$password=$script:password,
+    [Parameter(Mandatory=$true)][string]$OGName=$script:OGName,
+    [Parameter(Mandatory=$true)][string]$Server=$script:Server
 )
 
 #Enable Debug Logging
-$Debug = $false;
+$Debug = $false
 
 $current_path = $PSScriptRoot;
 if($PSScriptRoot -eq ""){
     #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
-    $current_path = "C:\Temp";
+    $current_path = Get-Location
 } 
-$DateNow = Get-Date -Format "yyyyMMdd_hhmm";
-$pathfile = "$current_path\InstallWS1Win10CoMgmt_$DateNow";
-$Script:logLocation = "$pathfile.log";
-$Script:Path = $logLocation;
+$DateNow = Get-Date -Format "yyyyMMdd_hhmm"
+$scriptName = $MyInvocation.MyCommand.Name
+$logLocation = "$current_path\$scriptName_$DateNow.log"
+
 if($Debug){
-  write-host "Path: $Path"
+  write-host "Current Path: $current_path"
   write-host "LogLocation: $LogLocation"
 }
+
+$agentpath = "C:\Recovery\OEM"
+$agent = "AirwatchAgent.msi"
 
 $Global:ProgressPreference = 'SilentlyContinue'
 
@@ -84,11 +83,11 @@ function Get-WS1EnrollmentMode {
     return $registeredMode
   }
 
-Function Invoke-EnrollDevice {
+function Invoke-EnrollDevice {
     Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
 	{
-		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\AirwatchAgent.msi /qn ENROLL=Y DOWNLOADWSBUNDLE=false SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
+		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\$agent /qn ENROLL=Y DOWNLOADWSBUNDLE=false SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
 	}
 	catch
 	{
@@ -96,28 +95,24 @@ Function Invoke-EnrollDevice {
 	}
 }
 
-Function Invoke-DownloadAirwatchAgent {
-  try
-  {
-      [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
-      $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
-      $output = "$current_path\AirwatchAgent.msi"
-      $Response = Invoke-WebRequest -Uri $url -OutFile $output
-      # This will only execute if the Invoke-WebRequest is successful.
-      $StatusCode = $Response.StatusCode
-  } catch {
-      $StatusCode = $_.Exception.Response.StatusCode.value__
-      Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Error
-  }
+function Invoke-DownloadAirwatchAgent {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
+        $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
+        $output = "$current_path\$agent"
+        $Response = Invoke-WebRequest -Uri $url -OutFile $output
+        # This will only execute if the Invoke-WebRequest is successful.
+        $StatusCode = $Response.StatusCode
+    } catch {
+        $StatusCode = $_.Exception.Response.StatusCode.value__
+        Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Error
+    }
 }
 
-Function Invoke-Registration {
+function Invoke-Registration {
 
     Write-Log2 -Path "$logLocation" -Message "Beginning Enrollment Process" -Level Info
     Start-Sleep -Seconds 1
-
-    #Download latest AirwatchAgent.msi
-    Invoke-DownloadAirwatchAgent
 
     #Enrol using Staging flow with ASSIGNTOLOGGEDINUSER=Y
     Write-Log2 -Path "$logLocation" -Message "Running Enrollment process" -Level Info
@@ -145,24 +140,20 @@ Function Invoke-Registration {
 function Write-Log2{
   [CmdletBinding()]
   Param(
-      [string]$Message,
-      [Alias('LogPath')]
-      [Alias('LogLocation')]
-      [string]$Path=$Local:Path,
-      [Parameter(Mandatory=$false)]
-      [ValidateSet("Success","Error","Warn","Info")]
-      [string]$Level="Info"
+    [string]$Message,
+    [Alias('LogPath')][Alias('LogLocation')][string]$Path=$Local:Path,
+    [Parameter(Mandatory=$false)][ValidateSet("Success","Error","Warn","Info")][string]$Level="Info"
   )
 
   $ColorMap = @{"Success"="Green";"Error"="Red";"Warn"="Yellow"};
   $FontColor = "White";
   If($ColorMap.ContainsKey($Level)){$FontColor = $ColorMap[$Level];}
   $DateNow = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-  Add-Content -Path $Path -Value ("$DateNow     ($Level)     $Message")
+  Add-Content -Path $Path -Value ("$DateNow`t($Level)`t$Message")
   Write-Host "$DateNow::$Level`t$Message" -ForegroundColor $FontColor;
 }
 
-Function Main {
+function Main {
 
     If (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
     {
@@ -202,6 +193,10 @@ Function Main {
 
         if($connectionStatus -eq $true) {
             Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info
+        
+            #Download latest AirwatchAgent.msi
+            Invoke-DownloadAirwatchAgent
+
             Invoke-Registration
         } else {
             Write-Log2 -Path "$logLocation" -Message "Not connected to Wifi, showing UI notification to continue once reconnected" -Level Error
@@ -212,5 +207,5 @@ Function Main {
     }
 
 }
-
+#Call Main function
 Main
