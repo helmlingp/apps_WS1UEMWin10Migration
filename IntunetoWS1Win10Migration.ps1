@@ -50,7 +50,7 @@ if($Debug){
 }
 
 $deploypath = "C:\Recovery\OEM\$scriptBaseName"
-$deploypathscriptBaseName = "$deploypath"+"$delimiter"+"$scriptBaseName"
+$deploypathscriptName = "$deploypath"+"$delimiter"+"$scriptName"
 $agentpath = "C:\Recovery\OEM"
 $agent = "AirwatchAgent.msi"
 
@@ -73,9 +73,9 @@ function Write-Log2{
 function Invoke-CreateTask{
     #Get Current time to set Scheduled Task to run powershell
     $DateTime = (Get-Date).AddMinutes(5).ToString("HH:mm")
-    $arg = "-ep Bypass -File $deploypathscriptname -username $username -password $password -Server $Server -OGName $OGName"
+    $arg = "-ep Bypass -File $deploypathscriptName -username $username -password $password -Server $Server -OGName $OGName"
     
-    $TaskName = "$scriptName"
+    $TaskName = "$scriptBaseName"
     Try{
         $A = New-ScheduledTaskAction -Execute "C:\Windows\System32\WindowsPowerShell\v1.0\Powershell.exe" -Argument $arg 
         $T = New-ScheduledTaskTrigger -Once -RandomDelay "00:05" -At $DateTime
@@ -94,7 +94,7 @@ function Invoke-CreateTask{
 }
 
 function Build-MigrationScript {
-    $MigrationScript = @"
+    $MigrationScript = @'
 <#
 .Synopsis
     Unenrols Win10+ device from Intune and then enrols into WS1 UEM. Maintains Azure AD join status. Does not delete device records from Intune.
@@ -134,17 +134,19 @@ if($PSScriptRoot -eq ""){
     #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
     $current_path = Get-Location
 } 
+if($IsMacOS -or $IsLinux){$delimiter = "/"}elseif($IsWindows){$delimiter = "\"}
 $DateNow = Get-Date -Format "yyyyMMdd_hhmm"
 $scriptName = $MyInvocation.MyCommand.Name
-$logLocation = "$current_path\$scriptName_$DateNow.log"
+$scriptBaseName = (Get-Item $scriptName).Basename
+$logLocation = "$current_path"+"$delimiter"+"$scriptBaseName"+"_$DateNow.log"
 
 if($Debug){
   write-host "Current Path: $current_path"
   write-host "LogLocation: $LogLocation"
 }
 
-$deploypath = "C:\Recovery\OEM\$scriptName"
-$deploypathscriptname = "$deploypath\$scriptName.ps1"
+$deploypath = "C:\Recovery\OEM\$scriptBaseName"
+$deploypathscriptName = "$deploypath"+"$delimiter"+"$scriptName"
 $agentpath = "C:\Recovery\OEM"
 $agent = "AirwatchAgent.msi"
 
@@ -421,7 +423,7 @@ Function Main {
 }
 
 Main
-"@
+'@
     return $MigrationScript
 }
 
@@ -465,8 +467,8 @@ function Main {
 
     #Create migration script to be run by Scheduled Task
     $MigrationScript = Build-MigrationScript
-	New-Item -Path $deploypathscriptname -ItemType "file" -Value $MigrationScript -Force -Confirm:$false
-	Write-Log2 -Path "$logLocation" -Message "Created script $scriptname in $deploypath" -Level Info
+	New-Item -Path $deploypathscriptName -ItemType "file" -Value $MigrationScript -Force -Confirm:$false
+	Write-Log2 -Path "$logLocation" -Message "Created script $deploypathscriptName" -Level Info
 
     #Create Scheduled Task to run the main program
     Invoke-CreateTask
