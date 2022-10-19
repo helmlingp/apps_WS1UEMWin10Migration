@@ -41,17 +41,19 @@ if($PSScriptRoot -eq ""){
     #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
     $current_path = Get-Location
 } 
+if($IsMacOS -or $IsLinux){$delimiter = "/"}elseif($IsWindows){$delimiter = "\"}
 $DateNow = Get-Date -Format "yyyyMMdd_hhmm"
 $scriptName = $MyInvocation.MyCommand.Name
-$logLocation = "$current_path\$scriptName_$DateNow.log"
+$scriptBaseName = (Get-Item $scriptName).Basename
+$logLocation = "$current_path"+"$delimiter"+"$scriptBaseName"+"_$DateNow.log"
 
 if($Debug){
   write-host "Current Path: $current_path"
   write-host "LogLocation: $LogLocation"
 }
 
-$deploypath = "C:\Recovery\OEM\$scriptName"
-$deploypathscriptname = "$deploypath\$scriptName.ps1"
+$deploypath = "C:\Recovery\OEM\$scriptBaseName"
+$deploypathscriptBaseName = "$deploypath"+"$delimiter"+"$scriptBaseName"
 $agentpath = "C:\Recovery\OEM"
 $agent = "AirwatchAgent.msi"
 
