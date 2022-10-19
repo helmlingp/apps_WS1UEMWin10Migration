@@ -31,12 +31,8 @@ function Write-Log2{
     [CmdletBinding()]
     Param(
         [string]$Message,
-        [Alias('LogPath')]
-        [Alias('LogLocation')]
-        [string]$Path=$Local:Path,
-        [Parameter(Mandatory=$false)]
-        [ValidateSet("Success","Error","Warn","Info")]
-        [string]$Level="Info"
+        [Alias('LogPath')][Alias('LogLocation')][string]$Path=$Local:Path,
+        [Parameter(Mandatory=$false)][ValidateSet("Success","Error","Warn","Info")][string]$Level="Info"
     )
 
     $ColorMap = @{"Success"="Green";"Error"="Red";"Warn"="Yellow"};
