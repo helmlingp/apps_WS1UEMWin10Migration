@@ -215,9 +215,9 @@ function enable-notifications {
 
 function Invoke-Cleanup {
     #Remove Task that started the migration
-    Unregister-ScheduledTask -TaskName "WS1Win10Migration" -Confirm:$false
+    Unregister-ScheduledTask -TaskName "$scriptBaseName" -Confirm:$false
     #Remove folder containing scripts and agent file
-    Remove-Item -Path $current_path -Recurse -Force
+    #Remove-Item -Path $current_path -Recurse -Force
 }
 
 function disable-notifications {
