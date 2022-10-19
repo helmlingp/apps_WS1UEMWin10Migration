@@ -38,7 +38,7 @@ if($PSScriptRoot -eq ""){
     #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
     $current_path = Get-Location
 } 
-if($IsMacOS -or $IsLinux){$delimiter = "/"}elseif($IsWindows){$delimiter = "\"}
+if($IsMacOS -or $IsLinux){$delimiter = "/"}else{$delimiter = "\"}
 $DateNow = Get-Date -Format "yyyyMMdd_hhmm"
 $scriptName = $MyInvocation.MyCommand.Name
 $scriptBaseName = (Get-Item $scriptName).Basename
@@ -134,7 +134,7 @@ if($PSScriptRoot -eq ""){
     #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
     $current_path = Get-Location
 } 
-if($IsMacOS -or $IsLinux){$delimiter = "/"}elseif($IsWindows){$delimiter = "\"}
+if($IsMacOS -or $IsLinux){$delimiter = "/"}else{$delimiter = "\"}
 $DateNow = Get-Date -Format "yyyyMMdd_hhmm"
 $scriptName = $MyInvocation.MyCommand.Name
 $scriptBaseName = (Get-Item $scriptName).Basename
@@ -444,7 +444,7 @@ function Invoke-DownloadAirwatchAgent {
   
 function Main {
     #Setup Logging
-    Write-Log2 -Path "$logLocation" -Message "S" -Level Success
+    Write-Log2 -Path "$logLocation" -Message "Setup Logging" -Level Success
 
     if (!(Test-Path -LiteralPath $deploypath)) {
         try {

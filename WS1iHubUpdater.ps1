@@ -3,7 +3,7 @@
     This powershell script downloads the latest Workspace ONE Intelligent Hub application (AirwatchAgent.msi) and calls the inbuilt updater
     
   .NOTES
-    Created:   	  September, 2021
+    Created:   	  October, 2021
     Created by:	  Phil Helmling, @philhelmling
     Organization: VMware, Inc.
     Filename:     WS1iHubUpdater.ps1
@@ -21,11 +21,27 @@
     Timeout = 30
 #>
 
-$agent = "C:\Program Files (x86)\Airwatch\AgentUI\Update\AirwatchAgent.msi"
-$DateNow = Get-Date -Format "yyyyMMdd_hhmm";
-$pathfile = "C:\Program Files (x86)\Airwatch\AgentUI\Update_$DateNow";
-$logLocation = "$pathfile.log";
-$Updater = "C:\Program Files (x86)\Airwatch\AgentUI\AW.WinPC.Updater.exe"
+#Enable Debug Logging
+$Debug = $false
+
+$current_path = $PSScriptRoot;
+if($PSScriptRoot -eq ""){
+    #PSScriptRoot only popuates if the script is being run.  Default to default location if empty
+    $current_path = Get-Location
+} 
+if($IsMacOS -or $IsLinux){$delimiter = "/"}else{$delimiter = "\"}
+$DateNow = Get-Date -Format "yyyyMMdd_hhmm"
+$scriptName = $MyInvocation.MyCommand.Name
+$scriptBaseName = (Get-Item $scriptName).Basename
+$logLocation = "$current_path"+"$delimiter"+"$scriptBaseName"+"_$DateNow.log"
+
+if($Debug){
+  write-host "Current Path: $current_path"
+  write-host "LogLocation: $LogLocation"
+}
+
+$agent = 'C:\Program Files (x86)\Airwatch\AgentUI\Update\AirwatchAgent.msi'
+$Updater = 'C:\Program Files (x86)\Airwatch\AgentUI\AW.WinPC.Updater.exe'
 
 function Write-Log2{
     [CmdletBinding()]
