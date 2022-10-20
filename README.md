@@ -20,7 +20,7 @@ Install Command:  powershell.exe -ep bypass -file .\WS1toWS1Win10Migration.ps1 -
 Uninstall Command:  .
 Install Context:  Device
 Admin Rights: Yes
-When to Call Install Complete:  File Exists: C:\Recovery\OEM\WS1toWS1Win10Migration\WS1WinWS1toWS1Win10Migration10Migration.ps1
+When to Call Install Complete:  File Exists: C:\Recovery\OEM\WS1toWS1Win10Migration\WS1toWS1Win10Migration.ps1
 
 The Scheduled Task runs with SYSTEM privileges after a delay of 5 minutes from the time of deployment.
 
