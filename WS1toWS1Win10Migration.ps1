@@ -186,26 +186,59 @@ function Build-MigrationScript {
       $wow64uninstallkey = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
       $uninstallkey = "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
   
-      $uninstallkeys = @()
-      $uninstallkeys += Get-Childitem -recurse $wow64uninstallkey | Get-ItemProperty | Where-Object { ($_.DisplayName -like "VMware*" -and $_.DisplayName -ne "VMware Tools") -or $_.DisplayName -like "*Workspace ONE*"}
-      $uninstallkeys += Get-Childitem -recurse $uninstallkey | Get-ItemProperty | Where-Object { ($_.DisplayName -like "VMware*" -and $_.DisplayName -ne "VMware Tools") -or $_.DisplayName -like "*Workspace ONE*"}
-      
-      foreach ($uninstkey in $uninstallkeys) {
-        $quninst = $uninstskey.QuietUninstallString
-        if ($quninst){
-          if($quninst.StartsWith("msiexec.exe /I")){
-            $msiarg = ($quninst).substring(14)
-            Start-Process msiexec.exe -ArgumentList "/X";$msiarg
-          } else {
-              Start-Process cmd.exe -ArgumentList "/c";$quninst
-          }
-        } 
-        if (!$quninst){
-          $uninstallstring = $uninstkey.UninstallString
-          $msiarg = ($uninstallstring).substring(14)
-            Start-Process msiexec.exe -ArgumentList "/X";$msiarg
+      $products = @()
+      $products += Get-Childitem -recurse $wow64uninstallkey | Get-ItemProperty | Where-Object { ($_.DisplayName -like "VMware*" -and $_.DisplayName -ne "VMware Tools") -or $_.DisplayName -like "*Workspace ONE*"}
+      $products += Get-Childitem -recurse $uninstallkey | Get-ItemProperty | Where-Object { ($_.DisplayName -like "VMware*" -and $_.DisplayName -ne "VMware Tools") -or $_.DisplayName -like "*Workspace ONE*"}
+	  $quninstext = @('.exe','.cmd','.bat')
+	  $quninstextjoined = $quninstext.Foreach{$_ + '\b'} -join '|'
+	  
+	  foreach ($product in $products) {
+		$uninst = $product.UninstallString
+		
+		$quninst = $product.QuietUninstallString
+		
+		if ($quninst) {
+			
+			if($quninst -match $quninstextjoined){
+				
+				for ($i = 0; $i -lt $quninstext.count; $i++) {
+					
+					$ext = $quninstext[$i]
+					if ($quninst.Contains($ext)) {
+						$extlength = $ext.Length+1
+						$quninstcmd = $quninst.Substring(0,$quninst.IndexOf($ext)+$extlength)
+						$quninstarg = ($quninst.Substring($quninst.IndexOf($ext)+$extlength)).Trim()
+						if(!$quninstarg){
+							& "$quninstcmd"
+							#Start-Process $quninstcmd
+							write-host "$quninstcmd"
+							#Write-Log2 -Path "$logLocation" -Message "quiet uninstall $quninstcmd" -Level Info
+						} else {
+							& "$quninstcmd" "$quninsta"
+							#Start-Process $quninstcmd -ArgumentList $quninstarg
+							write-host "$quninstcmd$quninstarg"
+							#Write-Log2 -Path "$logLocation" -Message "quiet uninstall $quninstcmd $quninstarg" -Level Info
+						}
+					}
+				}
+			} else {
+					$msiprod = ($quninst).substring(14)
+					$msiarg = " /X $msiprod /qn"
+					Start-Process msiexec.exe -ArgumentList $msiarg
+					write-host "msiexe.exe $msiarg"
+					#Write-Log2 -Path "$logLocation" -Message "quiet uninstall msiexec.exe -ArgumentList $msiarg" -Level Info
+				}
+			}
+		
+		if ($uninst.StartsWith("msiexec.exe","CurrentCultureIgnoreCase")){
+            $msiprod = ($uninst).substring(14)
+			$msiarg = " /X $msiprod /qn"
+            Start-Process msiexec.exe -ArgumentList $msiarg
+			write-host "msiexe.exe $msiarg"
+			#Write-Log2 -Path "$logLocation" -Message "quiet uninstall msiexec.exe -ArgumentList $msiarg" -Level Info
         }
-      }
+	  }
+
   
       #uninstall WS1 App
       Write-Log2 -Path "$logLocation" -Message "Uninstalling Workspace ONE Intelligent Hub APPX" -Level Info
@@ -376,7 +409,7 @@ function Build-MigrationScript {
       #Suspend BitLocker so the device doesn't waste time unencrypting and re-encrypting. Device Remains encrypted, see:
       #https://docs.microsoft.com/en-us/powershell/module/bitlocker/suspend-bitlocker?view=win10-ps
       Write-Log2 -Path "$logLocation" -Message "Suspending BitLocker" -Level Info
-      Get-BitLockerVolume | Suspend-BitLocker
+      Get-BitLockerVolume | Suspend-BitLocker -ErrorAction SilentlyContinue
       
       #Get OMADM Account
       $Account = Get-OMADMAccount
@@ -447,7 +480,7 @@ function Build-MigrationScript {
   
       #Enable BitLocker
       Write-Log2 -Path "$logLocation" -Message "Resume BitLocker" -Level Info
-      Get-BitLockerVolume | Resume-BitLocker
+      Get-BitLockerVolume | Resume-BitLocker -ErrorAction SilentlyContinue
   
       #Enable Toast notifications
       $appsinstalled = $false
