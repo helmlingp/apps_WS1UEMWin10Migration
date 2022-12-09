@@ -12,7 +12,7 @@
     Created by:	    Phil Helmling, @philhelmling
     Modified by:    Pete Lindley, @tbwfdu
     Organization:   VMware, Inc.
-    Filename:       InstallWS1Win10CoMgmt.ps1
+    Filename:       InstallWS1Win10Registered.ps1
     Updated:        October, 2022
 .DESCRIPTION
     Downloads the latest Workspace ONE Intelligent Hub application (AirwatchAgent.msi) and registers the device against the Workspace ONE UEM environment in Registered Mode.
@@ -89,7 +89,7 @@ function Invoke-EnrollDevice {
     Write-Log2 -Path "$logLocation" -Message "Enrolling device into $SERVER" -Level Info
     Try
 	{
-		Start-Process msiexec.exe -Wait -ArgumentList "/i $current_path\$agent /qn ENROLL=Y DOWNLOADWSBUNDLE=false SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $current_path\AWAgent.log"
+		Start-Process msiexec.exe -Wait -ArgumentList "/i $agentpath\$agent /qn ENROLL=Y DOWNLOADWSBUNDLE=false SERVER=$script:Server LGNAME=$script:OGName USERNAME=$script:username PASSWORD=$script:password ASSIGNTOLOGGEDINUSER=Y /log $agentpath\AWAgent.log"
 	}
 	catch
 	{
@@ -101,7 +101,7 @@ function Invoke-DownloadAirwatchAgent {
     try {
         [Net.ServicePointManager]::SecurityProtocol = 'Tls11,Tls12'
         $url = "https://packages.vmware.com/wsone/AirwatchAgent.msi"
-        $output = "$current_path\$agent"
+        $output = "$agentpath\$agent"
         $Response = Invoke-WebRequest -Uri $url -OutFile $output
         # This will only execute if the Invoke-WebRequest is successful.
         $StatusCode = $Response.StatusCode
@@ -192,7 +192,17 @@ function Main {
 
         if($connectionStatus -eq $true) {
             Write-Log2 -Path "$logLocation" -Message "Running Device Migration in the background" -Level Info
-        
+            
+            if (!(Test-Path -LiteralPath $agentpath)) {
+                try {
+                New-Item -Path $agentpath -ItemType Directory -ErrorAction Stop | Out-Null #-Force
+                }
+                catch {
+                Write-Error -Message "Unable to create directory '$agentpath'. Error was: $_" -ErrorAction Stop
+                }
+                "Successfully created directory '$agentpath'."
+            }
+
             #Download latest AirwatchAgent.msi
             Invoke-DownloadAirwatchAgent
 

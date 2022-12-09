@@ -440,7 +440,7 @@ function Invoke-DownloadAirwatchAgent {
         $StatusCode = $_.Exception.Response.StatusCode.value__
         Write-Log2 -Path "$logLocation" -Message "Failed to download AirwatchAgent.msi with StatusCode $StatusCode" -Level Error
     }
-  }
+}
   
 function Main {
     #Setup Logging
